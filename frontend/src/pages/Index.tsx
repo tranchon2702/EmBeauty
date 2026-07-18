@@ -160,7 +160,7 @@ const Index = () => {
               <CalendarRange className="w-[17px] h-[17px] text-white" />
             </div>
             <div className="flex-1 text-left">
-              <p className="font-bold text-[13px] text-white leading-tight">Đặt Lịch Qua Zalo</p>
+              <p className="font-bold text-[13px] text-white leading-tight">Đặt Lịch</p>
               <p className="text-[10px] text-white/65 mt-0.5">Nhắn tin cho EM Beauty qua Zalo nha! 💬</p>
             </div>
             <ChevronRight className="w-4 h-4 text-white/50 shrink-0" />

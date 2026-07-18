@@ -174,7 +174,7 @@ const Tick = () => {
               rel="noopener noreferrer"
               className="inline-block mt-4 px-4 py-2 bg-[#9E5E6F] hover:bg-[#8D5060] text-white rounded-xl text-xs font-semibold shadow-sm transition"
             >
-              Đặt lịch qua Zalo làm đẹp ngay
+              Đặt lịch làm đẹp ngay
             </a>
           </div>
         )}

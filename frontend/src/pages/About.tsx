@@ -195,7 +195,7 @@ const About = () => {
                     className="text-[11px] font-bold text-[#9E5E6F] hover:text-[#763A48] flex items-center gap-1 transition"
                   >
                     <Sparkles className="w-3 h-3" />
-                    Đặt lịch dịch vụ {cat.label} qua Zalo
+                    Đặt lịch dịch vụ {cat.label}
                     <ChevronRight className="w-3 h-3" />
                   </a>
                 </div>
@@ -221,7 +221,7 @@ const About = () => {
           rel="noopener noreferrer"
           className="flex items-center justify-center gap-2 py-3.5 bg-[#9E5E6F] hover:bg-[#8D5060] active:scale-95 text-white font-bold rounded-2xl shadow-lg shadow-[#9E5E6F]/35 transition text-sm w-full"
         >
-          <CalendarIcon /> Đặt Lịch Qua Zalo
+          <CalendarIcon /> Đặt Lịch Ngay
         </a>
       </div>
     </div>
