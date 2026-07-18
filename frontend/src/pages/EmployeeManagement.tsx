@@ -705,7 +705,8 @@ const EmployeeManagement = () => {
                     </div>
                   </div>
 
-                  {/* Telegram */}
+                  {/* Telegram hidden temporarily */}
+                  {/*
                   <div className="bg-white rounded-2xl p-5 border border-stone-200/60 shadow-sm">
                     <h2 className="text-xs font-bold text-stone-400 uppercase tracking-wider mb-1 flex items-center gap-1.5">
                       <Bot className="w-3.5 h-3.5 text-[#9E5E6F]" /> Thông báo Telegram Bot
@@ -747,6 +748,7 @@ const EmployeeManagement = () => {
                       </button>
                     </div>
                   </div>
+                  */}
 
                   {/* Welcome Messages (Gen-Z vibes for homepage) */}
                   <div className="bg-white rounded-2xl p-5 border border-stone-200/60 shadow-sm">

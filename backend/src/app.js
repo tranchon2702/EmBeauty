@@ -20,7 +20,7 @@ dotenv.config();
 connectDB();
 
 // Start scheduled cron jobs (daily reminder etc.)
-startCronJobs();
+// startCronJobs();
 
 const app = express();
 
