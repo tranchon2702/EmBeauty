@@ -21,7 +21,7 @@ const settingsSchema = new mongoose.Schema({
   // Salon info
   salonName: {
     type: String,
-    default: 'EM Beauty Nails & Makeup'
+    default: 'EM Beauty'
   },
   salonPhone: {
     type: String,

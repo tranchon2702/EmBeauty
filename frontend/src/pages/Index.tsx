@@ -94,10 +94,10 @@ const Index = () => {
 
           {/* Script logo */}
           <h1
-            className="font-['Great_Vibes'] text-[56px] text-primary leading-[1.1] select-none break-words"
+            className="font-['Great_Vibes'] text-[64px] text-primary leading-[1.1] select-none break-words"
             style={{ letterSpacing: "-0.01em" }}
           >
-            {settings.salonName}
+            {settings.salonName.split(/nails|makeup|&/i)[0].trim() || "EM Beauty"}
           </h1>
 
           {/* Subtitle with ruled lines */}
