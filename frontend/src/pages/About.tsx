@@ -178,6 +178,7 @@ const About = () => {
 
                 {/* Book CTA at bottom of each section */}
                 <div className="px-5 py-3 bg-stone-50/50 border-t border-stone-100">
+                  {/*
                   <Link
                     to="/booking"
                     className="text-[11px] font-bold text-[#9E5E6F] hover:text-[#763A48] flex items-center gap-1 transition"
@@ -186,6 +187,17 @@ const About = () => {
                     Đặt lịch dịch vụ {cat.label}
                     <ChevronRight className="w-3 h-3" />
                   </Link>
+                  */}
+                  <a
+                    href="https://zalo.me/0358367919"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-[11px] font-bold text-[#9E5E6F] hover:text-[#763A48] flex items-center gap-1 transition"
+                  >
+                    <Sparkles className="w-3 h-3" />
+                    Đặt lịch dịch vụ {cat.label} qua Zalo
+                    <ChevronRight className="w-3 h-3" />
+                  </a>
                 </div>
               </section>
             );
@@ -195,12 +207,22 @@ const About = () => {
 
       {/* ── Floating Booking Button ── */}
       <div className="fixed bottom-5 left-1/2 -translate-x-1/2 w-full max-w-xs px-4 z-30">
+        {/*
         <Link
           to="/booking"
           className="flex items-center justify-center gap-2 py-3.5 bg-[#9E5E6F] hover:bg-[#8D5060] active:scale-95 text-white font-bold rounded-2xl shadow-lg shadow-[#9E5E6F]/35 transition text-sm w-full"
         >
           <CalendarIcon /> Đặt Lịch Ngay
         </Link>
+        */}
+        <a
+          href="https://zalo.me/0358367919"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="flex items-center justify-center gap-2 py-3.5 bg-[#9E5E6F] hover:bg-[#8D5060] active:scale-95 text-white font-bold rounded-2xl shadow-lg shadow-[#9E5E6F]/35 transition text-sm w-full"
+        >
+          <CalendarIcon /> Đặt Lịch Qua Zalo
+        </a>
       </div>
     </div>
   );

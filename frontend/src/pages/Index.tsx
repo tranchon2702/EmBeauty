@@ -134,7 +134,8 @@ const Index = () => {
         {/* ── Navigation links ── */}
         <div className="px-5 pb-6 space-y-2.5">
 
-          {/* Primary CTA */}
+          {/* Temporarily redirected to Zalo instead of /booking form */}
+          {/*
           <Link
             to="/booking"
             className="flex items-center gap-3.5 w-full px-4 py-3.5 bg-primary hover:bg-primary/90 active:scale-[0.98] text-white rounded-2xl shadow-md shadow-primary/20 transition-colors duration-150"
@@ -148,6 +149,22 @@ const Index = () => {
             </div>
             <ChevronRight className="w-4 h-4 text-white/50 shrink-0" />
           </Link>
+          */}
+          <a
+            href="https://zalo.me/0358367919"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center gap-3.5 w-full px-4 py-3.5 bg-primary hover:bg-primary/90 active:scale-[0.98] text-white rounded-2xl shadow-md shadow-primary/20 transition-colors duration-150"
+          >
+            <div className="p-1.5 bg-white/15 rounded-xl shrink-0">
+              <CalendarRange className="w-[17px] h-[17px] text-white" />
+            </div>
+            <div className="flex-1 text-left">
+              <p className="font-bold text-[13px] text-white leading-tight">Đặt Lịch Qua Zalo</p>
+              <p className="text-[10px] text-white/65 mt-0.5">Nhắn tin cho EM Beauty qua Zalo nha! 💬</p>
+            </div>
+            <ChevronRight className="w-4 h-4 text-white/50 shrink-0" />
+          </a>
 
           {/* Secondary links */}
           {[

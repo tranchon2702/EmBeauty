@@ -160,12 +160,22 @@ const Tick = () => {
             <p className="text-xs text-stone-400 mt-1 max-w-[280px] mx-auto leading-relaxed">
               Bạn vui lòng thực hiện dịch vụ tại tiệm để được nhân viên hỗ trợ đăng ký và tích điểm thành viên!
             </p>
+            {/*
             <Link
               to="/booking"
               className="inline-block mt-4 px-4 py-2 bg-[#9E5E6F] hover:bg-[#8D5060] text-white rounded-xl text-xs font-semibold shadow-sm transition"
             >
               Đặt lịch làm đẹp ngay
             </Link>
+            */}
+            <a
+              href="https://zalo.me/0358367919"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-block mt-4 px-4 py-2 bg-[#9E5E6F] hover:bg-[#8D5060] text-white rounded-xl text-xs font-semibold shadow-sm transition"
+            >
+              Đặt lịch qua Zalo làm đẹp ngay
+            </a>
           </div>
         )}
       </div>
