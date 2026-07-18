@@ -92,13 +92,15 @@ const Index = () => {
         {/* ── Header: Brand ── */}
         <div className="pt-8 pb-5 px-7 text-center">
 
-          {/* Script logo */}
-          <h1
-            className="font-['Great_Vibes'] text-[64px] text-primary leading-[1.1] select-none break-words"
-            style={{ letterSpacing: "-0.01em" }}
-          >
-            {settings.salonName.split(/nails|makeup|&/i)[0].trim() || "EM Beauty"}
-          </h1>
+          {/* Script logo with elegant staggered alignment */}
+          <div className="font-['Great_Vibes'] text-[60px] text-primary leading-[0.85] select-none flex flex-col items-center pt-2 pb-1.5">
+            <span className="w-full text-left pl-[22%]">
+              {settings.salonName.split(/nails|makeup|&/i)[0].trim().split(" ")[0] || "EM"}
+            </span>
+            <span className="w-full text-right pr-[20%] -mt-2">
+              {settings.salonName.split(/nails|makeup|&/i)[0].trim().split(" ").slice(1).join(" ") || "Beauty"}
+            </span>
+          </div>
 
           {/* Subtitle with ruled lines */}
           <div className="flex items-center gap-2.5 mt-0.5 mb-5">
