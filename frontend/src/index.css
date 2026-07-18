@@ -1,0 +1,81 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: #FDFBF7;
+    --foreground: #2C2A29;
+    --primary: #9E5E6F;          /* Rose Gold / Mauve */
+    --primary-foreground: #FFFFFF;
+    --secondary: #F4EFEB;        /* Cream / Soft Beige */
+    --secondary-foreground: #2C2A29;
+    --accent: #F9ECEF;           /* Blush Pink */
+    --accent-foreground: #763A48;
+    --muted: #8E8A86;
+    --muted-foreground: #5E5A56;
+    --border: #EAE3DC;
+    --input: #EAE3DC;
+    --ring: #9E5E6F;
+    --radius: 0.75rem;
+  }
+
+  .dark {
+    --background: #1C1B1A;
+    --foreground: #F4EFEB;
+    --primary: #C58B9C;
+    --primary-foreground: #1C1B1A;
+    --secondary: #2C2A29;
+    --secondary-foreground: #F4EFEB;
+    --accent: #3E242C;
+    --accent-foreground: #E5B2C0;
+    --muted: #5E5A56;
+    --muted-foreground: #8E8A86;
+    --border: #3E3B38;
+    --input: #3E3B38;
+    --ring: #C58B9C;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  html,
+  body {
+    overflow-x: clip; /* Hallmark gate 34 — no horizontal scroll */
+  }
+  body {
+    @apply bg-background text-foreground;
+    font-feature-settings: "rlig" 1, "calt" 1;
+  }
+}
+
+/* Tabular numbers for price columns */
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Hide scrollbar utility — cross-browser */
+.no-scrollbar {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+/* Custom scrollbars */
+::-webkit-scrollbar {
+  width: 6px;
+}
+::-webkit-scrollbar-track {
+  background: var(--background);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--muted);
+}
