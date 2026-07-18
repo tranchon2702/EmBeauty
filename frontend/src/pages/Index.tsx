@@ -93,11 +93,11 @@ const Index = () => {
         <div className="pt-8 pb-5 px-7 text-center">
 
           {/* Script logo with elegant staggered alignment */}
-          <div className="font-['Great_Vibes'] text-[60px] text-primary leading-[0.85] select-none flex flex-col items-center pt-2 pb-1.5">
-            <span className="w-full text-left pl-[22%]">
+          <div className="font-['Great_Vibes'] text-[60px] text-primary leading-[1.05] select-none flex flex-col items-center pt-2 pb-1">
+            <span className="w-full text-left pl-[18%]">
               {settings.salonName.split(/nails|makeup|&/i)[0].trim().split(" ")[0] || "EM"}
             </span>
-            <span className="w-full text-right pr-[20%] -mt-2">
+            <span className="w-full text-right pr-[15%] mt-0">
               {settings.salonName.split(/nails|makeup|&/i)[0].trim().split(" ").slice(1).join(" ") || "Beauty"}
             </span>
           </div>
