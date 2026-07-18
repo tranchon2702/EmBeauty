@@ -26,7 +26,11 @@ router.put('/', async (req, res) => {
     telegramNotificationsEnabled,
     salonName,
     salonPhone,
-    welcomeMessages
+    welcomeMessages,
+    salonAddress,
+    salonHours,
+    googleMapsUrl,
+    facebookUrl
   } = req.body;
 
   try {
@@ -41,6 +45,10 @@ router.put('/', async (req, res) => {
     if (telegramNotificationsEnabled !== undefined) settings.telegramNotificationsEnabled = Boolean(telegramNotificationsEnabled);
     if (salonName !== undefined) settings.salonName = salonName.trim();
     if (salonPhone !== undefined) settings.salonPhone = salonPhone.trim();
+    if (salonAddress !== undefined) settings.salonAddress = salonAddress.trim();
+    if (salonHours !== undefined) settings.salonHours = salonHours.trim();
+    if (googleMapsUrl !== undefined) settings.googleMapsUrl = googleMapsUrl.trim();
+    if (facebookUrl !== undefined) settings.facebookUrl = facebookUrl.trim();
     if (welcomeMessages !== undefined && Array.isArray(welcomeMessages)) {
       settings.welcomeMessages = welcomeMessages.filter(m => typeof m === 'string' && m.trim());
     }

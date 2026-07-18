@@ -12,6 +12,14 @@ interface ServiceItem {
   description?: string;
 }
 
+interface SalonSettings {
+  salonName: string;
+  salonPhone: string;
+  salonAddress: string;
+  salonHours: string;
+  googleMapsUrl: string;
+}
+
 type Category = "nails" | "eyelashes" | "washing" | "makeup";
 
 const CATEGORIES: { key: Category; label: string; emoji: string; title: string; subtitle: string }[] = [
@@ -26,8 +34,17 @@ const About = () => {
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<Category>("nails");
   const tabBarRef = useRef<HTMLDivElement>(null);
+  
+  const [settings, setSettings] = useState<SalonSettings>({
+    salonName: "EM Beauty",
+    salonPhone: "035 836 7919",
+    salonAddress: "64 Linh Trung, Linh Xuân, TP.HCM",
+    salonHours: "08:00 - 20:30",
+    googleMapsUrl: "https://maps.app.goo.gl/DruZXXTrtSVBj6LW9"
+  });
 
   useEffect(() => {
+    // 1. Fetch services
     const fetchServices = async () => {
       try {
         const res = await fetch(`${API_BASE}/services`);
@@ -38,7 +55,28 @@ const About = () => {
         setLoading(false);
       }
     };
+    
+    // 2. Fetch settings
+    const fetchSettings = async () => {
+      try {
+        const res = await fetch(`${API_BASE}/settings`);
+        if (res.ok) {
+          const data = await res.json();
+          setSettings({
+            salonName: data.salonName || "EM Beauty",
+            salonPhone: data.salonPhone || "035 836 7919",
+            salonAddress: data.salonAddress || "64 Linh Trung, Linh Xuân, TP.HCM",
+            salonHours: data.salonHours || "08:00 - 20:30",
+            googleMapsUrl: data.googleMapsUrl || "https://maps.app.goo.gl/DruZXXTrtSVBj6LW9"
+          });
+        }
+      } catch (err) {
+        console.error("Lỗi lấy cài đặt tiệm:", err);
+      }
+    };
+
     fetchServices();
+    fetchSettings();
   }, []);
 
   // Intersection observer to auto-update active tab while scrolling
@@ -83,20 +121,20 @@ const About = () => {
         </Link>
 
         <h1 className="font-serif text-2xl font-bold mb-1 relative z-10">Bảng Giá Dịch Vụ</h1>
-        <p className="text-sm text-white/75 italic relative z-10">EM Beauty Nails &amp; Makeup</p>
+        <p className="text-sm text-white/75 italic relative z-10">{settings.salonName}</p>
 
         {/* Contact strip */}
         <div className="mt-5 flex flex-wrap justify-center gap-3 text-[11px] relative z-10">
-          <a href="https://maps.app.goo.gl/DruZXXTrtSVBj6LW9" target="_blank" rel="noopener noreferrer"
+          <a href={settings.googleMapsUrl} target="_blank" rel="noopener noreferrer"
             className="flex items-center gap-1.5 bg-white/15 hover:bg-white/25 backdrop-blur-sm rounded-full px-3 py-1.5 transition">
-            <MapPin className="w-3.5 h-3.5" /> 64 Linh Trung, Linh Xuân, TP.HCM
+            <MapPin className="w-3.5 h-3.5" /> {settings.salonAddress}
           </a>
-          <a href="tel:0358367919"
+          <a href={`tel:${settings.salonPhone}`}
             className="flex items-center gap-1.5 bg-white/15 hover:bg-white/25 backdrop-blur-sm rounded-full px-3 py-1.5 transition">
-            <Phone className="w-3.5 h-3.5" /> 035 836 7919
+            <Phone className="w-3.5 h-3.5" /> {settings.salonPhone}
           </a>
           <div className="flex items-center gap-1.5 bg-white/15 rounded-full px-3 py-1.5">
-            <Clock className="w-3.5 h-3.5" /> 08:00 – 20:30
+            <Clock className="w-3.5 h-3.5" /> {settings.salonHours}
           </div>
         </div>
       </div>
@@ -134,42 +172,40 @@ const About = () => {
               <section
                 key={cat.key}
                 id={`section-${cat.key}`}
-                className="scroll-mt-20 bg-white rounded-2xl border border-stone-200/60 shadow-sm overflow-hidden"
+                className="bg-white rounded-3xl border border-stone-250/70 shadow-sm overflow-hidden"
               >
-                {/* Section header */}
-                <div className="bg-gradient-to-r from-[#F9ECEF] to-white px-5 py-4 border-b border-stone-100">
-                  <div className="flex items-center gap-3">
-                    <div className="text-2xl">{cat.emoji}</div>
+                {/* Section Header */}
+                <div className="px-5 pt-5 pb-4 border-b border-stone-100 bg-[#FDFBF7]/50">
+                  <div className="flex items-center gap-2">
+                    <span className="text-xl">{cat.emoji}</span>
                     <div>
-                      <h2 className="font-serif font-bold text-[#763A48] text-base leading-tight">{cat.title}</h2>
+                      <h3 className="font-serif font-bold text-stone-900 text-base">{cat.title}</h3>
                       <p className="text-[10px] text-stone-400 mt-0.5">{cat.subtitle}</p>
                     </div>
                   </div>
                 </div>
 
-                {/* Services list */}
+                {/* Service Items List */}
                 {catServices.length === 0 ? (
-                  <div className="px-5 py-6 text-center text-xs text-stone-400 italic">
-                    Chưa có dịch vụ trong danh mục này
+                  <div className="py-8 text-center text-stone-400 text-xs">
+                    Không có dịch vụ nào trong danh mục này.
                   </div>
                 ) : (
-                  <div className="divide-y divide-stone-50">
-                    {catServices.map((item, idx) => (
-                      <div
-                        key={item._id}
-                        className="px-5 py-3.5 flex items-center justify-between gap-3 hover:bg-stone-50/60 transition"
-                      >
-                        <div className="flex-1 min-w-0">
-                          <h3 className="text-sm font-semibold text-stone-800 leading-snug">{item.name}</h3>
-                          {item.description && (
-                            <p className="text-[10px] text-stone-400 mt-0.5 italic">{item.description}</p>
+                  <div className="divide-y divide-stone-100">
+                    {catServices.map((srv) => (
+                      <div key={srv._id} className="p-5 flex items-start justify-between gap-4">
+                        <div className="space-y-1">
+                          <h4 className="font-bold text-stone-850 text-[13px] leading-snug">{srv.name}</h4>
+                          <div className="flex items-center gap-1 text-[10px] text-stone-400">
+                            <Clock className="w-3 h-3" />
+                            <span>{srv.duration} phút</span>
+                          </div>
+                          {srv.description && (
+                            <p className="text-[10.5px] text-stone-500 leading-relaxed pt-0.5">{srv.description}</p>
                           )}
-                          <p className="text-[10px] text-stone-400 mt-0.5 flex items-center gap-1">
-                            <Clock className="w-2.5 h-2.5" /> {item.duration} phút
-                          </p>
                         </div>
-                        <span className="text-sm font-bold text-[#9E5E6F] font-serif shrink-0 whitespace-nowrap">
-                          {formatPrice(item.price)}
+                        <span className="font-sans font-bold text-[#9E5E6F] text-[13px] tracking-wide shrink-0 tabular-nums pt-0.5">
+                          {formatPrice(srv.price)}
                         </span>
                       </div>
                     ))}

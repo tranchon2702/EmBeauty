@@ -42,6 +42,10 @@ interface SettingsData {
   telegramNotificationsEnabled: boolean;
   salonName: string;
   salonPhone: string;
+  salonAddress: string;
+  salonHours: string;
+  googleMapsUrl: string;
+  facebookUrl: string;
   welcomeMessages: string[];
 }
 
@@ -80,6 +84,10 @@ const EmployeeManagement = () => {
     telegramNotificationsEnabled: false,
     salonName: "EM Beauty Nails & Makeup",
     salonPhone: "035 836 7919",
+    salonAddress: "64 Linh Trung, Linh Xuân, TP.HCM",
+    salonHours: "08:00 - 20:30",
+    googleMapsUrl: "https://maps.app.goo.gl/DruZXXTrtSVBj6LW9",
+    facebookUrl: "https://www.facebook.com/thai.ngoc.quynh.nhu?locale=vi_VN",
     welcomeMessages: [],
   });
   const [newVibe, setNewVibe] = useState("");
@@ -128,6 +136,10 @@ const EmployeeManagement = () => {
           telegramNotificationsEnabled: s.telegramNotificationsEnabled || false,
           salonName: s.salonName || "EM Beauty Nails & Makeup",
           salonPhone: s.salonPhone || "035 836 7919",
+          salonAddress: s.salonAddress || "64 Linh Trung, Linh Xuân, TP.HCM",
+          salonHours: s.salonHours || "08:00 - 20:30",
+          googleMapsUrl: s.googleMapsUrl || "https://maps.app.goo.gl/DruZXXTrtSVBj6LW9",
+          facebookUrl: s.facebookUrl || "https://www.facebook.com/thai.ngoc.quynh.nhu?locale=vi_VN",
           welcomeMessages: s.welcomeMessages || [],
         });
       }
@@ -635,10 +647,55 @@ const EmployeeManagement = () => {
             {activeTab === "settings" && (
               <div className="max-w-2xl mx-auto space-y-5">
                 <form onSubmit={handleSaveSettings} className="space-y-5">
+                  {/* Salon Information CMS */}
+                  <div className="bg-white rounded-2xl p-5 border border-stone-200/60 shadow-sm space-y-4">
+                    <h2 className="text-xs font-bold text-stone-400 uppercase tracking-wider flex items-center gap-1.5 border-b border-stone-100 pb-2">
+                      <Landmark className="w-3.5 h-3.5 text-primary" /> Thông tin hiển thị cửa hàng
+                    </h2>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5 text-xs">
+                      <div>
+                        <label className="text-[10px] text-stone-400 font-bold block mb-1">Tên Tiệm (Logo chính)</label>
+                        <input type="text" value={settings.salonName}
+                          onChange={e => setSettings(s => ({ ...s, salonName: e.target.value }))}
+                          className="w-full px-3 py-2 bg-stone-50 border border-stone-200 rounded-xl focus:outline-none" />
+                      </div>
+                      <div>
+                        <label className="text-[10px] text-stone-400 font-bold block mb-1">Số Điện Thoại</label>
+                        <input type="text" value={settings.salonPhone}
+                          onChange={e => setSettings(s => ({ ...s, salonPhone: e.target.value }))}
+                          className="w-full px-3 py-2 bg-stone-50 border border-stone-200 rounded-xl focus:outline-none" />
+                      </div>
+                      <div className="md:col-span-2">
+                        <label className="text-[10px] text-stone-400 font-bold block mb-1">Địa Chỉ Hiển Thị</label>
+                        <input type="text" value={settings.salonAddress}
+                          onChange={e => setSettings(s => ({ ...s, salonAddress: e.target.value }))}
+                          className="w-full px-3 py-2 bg-stone-50 border border-stone-200 rounded-xl focus:outline-none" />
+                      </div>
+                      <div>
+                        <label className="text-[10px] text-stone-400 font-bold block mb-1">Giờ Mở Cửa (Hiển thị)</label>
+                        <input type="text" value={settings.salonHours}
+                          onChange={e => setSettings(s => ({ ...s, salonHours: e.target.value }))}
+                          className="w-full px-3 py-2 bg-stone-50 border border-stone-200 rounded-xl focus:outline-none" />
+                      </div>
+                      <div>
+                        <label className="text-[10px] text-stone-400 font-bold block mb-1">Đường dẫn Google Maps (Tùy chọn)</label>
+                        <input type="text" value={settings.googleMapsUrl}
+                          onChange={e => setSettings(s => ({ ...s, googleMapsUrl: e.target.value }))}
+                          className="w-full px-3 py-2 bg-stone-50 border border-stone-200 rounded-xl focus:outline-none" />
+                      </div>
+                      <div className="md:col-span-2">
+                        <label className="text-[10px] text-stone-400 font-bold block mb-1">Đường dẫn Fanpage Facebook</label>
+                        <input type="text" value={settings.facebookUrl}
+                          onChange={e => setSettings(s => ({ ...s, facebookUrl: e.target.value }))}
+                          className="w-full px-3 py-2 bg-stone-50 border border-stone-200 rounded-xl focus:outline-none" />
+                      </div>
+                    </div>
+                  </div>
+
                   {/* Loyalty Points */}
                   <div className="bg-white rounded-2xl p-5 border border-stone-200/60 shadow-sm">
                     <h2 className="text-xs font-bold text-stone-400 uppercase tracking-wider mb-4 flex items-center gap-1.5">
-                      <Percent className="w-3.5 h-3.5 text-[#9E5E6F]" /> Tích điểm thành viên
+                      <Percent className="w-3.5 h-3.5 text-primary" /> Tích điểm thành viên
                     </h2>
                     <div className="flex items-center gap-3 text-xs">
                       <input type="number" min={1} max={100} value={settings.pointRewardRate}

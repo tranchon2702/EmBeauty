@@ -27,6 +27,22 @@ const settingsSchema = new mongoose.Schema({
     type: String,
     default: '035 836 7919'
   },
+  salonAddress: {
+    type: String,
+    default: '64 Linh Trung, Linh Xuân, TP.HCM'
+  },
+  salonHours: {
+    type: String,
+    default: '08:00 - 20:30'
+  },
+  googleMapsUrl: {
+    type: String,
+    default: 'https://maps.app.goo.gl/DruZXXTrtSVBj6LW9'
+  },
+  facebookUrl: {
+    type: String,
+    default: 'https://www.facebook.com/thai.ngoc.quynh.nhu?locale=vi_VN'
+  },
   // Gen-Z rotating welcome messages on homepage
   welcomeMessages: {
     type: [String],
