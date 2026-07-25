@@ -13,7 +13,7 @@ interface ServiceItem {
   _id: string;
   name: string;
   category: string;
-  duration: number;
+  duration?: number;
 }
 
 const Booking = () => {
@@ -228,7 +228,6 @@ const Booking = () => {
                       />
                       <span className="font-medium">{srv.name}</span>
                     </div>
-                    <span className="text-[10px] text-stone-400 font-semibold italic shrink-0">({srv.duration}p)</span>
                   </label>
                 );
               })}

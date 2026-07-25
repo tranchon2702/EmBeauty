@@ -21,7 +21,7 @@ interface Service {
   name: string;
   price: number;
   category: "nails" | "eyelashes" | "washing" | "makeup";
-  duration: number;
+  duration?: number;
   description?: string;
 }
 
@@ -98,7 +98,7 @@ const EmployeeManagement = () => {
 
   // Service form
   const [editingSrvId, setEditingSrvId] = useState<string | null>(null);
-  const [srvForm, setSrvForm] = useState({ name: "", price: "", category: "nails" as Service["category"], duration: "60", description: "" });
+  const [srvForm, setSrvForm] = useState({ name: "", price: "", category: "nails" as Service["category"], description: "" });
 
   // Bank form
   const [editingBankId, setEditingBankId] = useState<string | null>(null);
@@ -212,18 +212,18 @@ const EmployeeManagement = () => {
   // ── Service CRUD ──────────────────────────────────────────────────────────
   const handleSrvSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!srvForm.name || !srvForm.price || !srvForm.duration) { toast.warning("Điền đủ thông tin dịch vụ"); return; }
+    if (!srvForm.name || !srvForm.price) { toast.warning("Điền đủ thông tin dịch vụ"); return; }
     try {
       const url = editingSrvId ? `${API_BASE}/services/${editingSrvId}` : `${API_BASE}/services`;
       const method = editingSrvId ? "PUT" : "POST";
       const res = await fetch(url, {
         method,
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...srvForm, price: Number(srvForm.price), duration: Number(srvForm.duration) }),
+        body: JSON.stringify({ ...srvForm, price: Number(srvForm.price) }),
       });
       if (!res.ok) throw new Error();
       toast.success(editingSrvId ? "Cập nhật dịch vụ thành công" : "Thêm dịch vụ mới");
-      setSrvForm({ name: "", price: "", category: "nails", duration: "60", description: "" });
+      setSrvForm({ name: "", price: "", category: "nails", description: "" });
       setEditingSrvId(null);
       fetchAll();
     } catch { toast.error("Lỗi lưu dịch vụ"); }
@@ -231,7 +231,7 @@ const EmployeeManagement = () => {
 
   const handleEditSrv = (s: Service) => {
     setEditingSrvId(s._id);
-    setSrvForm({ name: s.name, price: String(s.price), category: s.category, duration: String(s.duration), description: s.description || "" });
+    setSrvForm({ name: s.name, price: String(s.price), category: s.category, description: s.description || "" });
   };
 
   const handleDeleteSrv = async (id: string) => {
@@ -491,19 +491,11 @@ const EmployeeManagement = () => {
                         onChange={e => setSrvForm(f => ({ ...f, name: e.target.value }))}
                         className="w-full px-3 py-2 bg-stone-50 border border-stone-200 rounded-xl focus:outline-none focus:ring-1 focus:ring-[#9E5E6F]" />
                     </div>
-                    <div className="grid grid-cols-2 gap-2">
-                      <div>
-                        <label className="text-[10px] text-stone-400 font-bold block mb-1">Đơn giá (đ) *</label>
-                        <input type="number" required placeholder="120000" value={srvForm.price}
-                          onChange={e => setSrvForm(f => ({ ...f, price: e.target.value }))}
-                          className="w-full px-3 py-2 bg-stone-50 border border-stone-200 rounded-xl focus:outline-none" />
-                      </div>
-                      <div>
-                        <label className="text-[10px] text-stone-400 font-bold block mb-1">Thời gian (phút) *</label>
-                        <input type="number" required placeholder="60" value={srvForm.duration}
-                          onChange={e => setSrvForm(f => ({ ...f, duration: e.target.value }))}
-                          className="w-full px-3 py-2 bg-stone-50 border border-stone-200 rounded-xl focus:outline-none" />
-                      </div>
+                    <div>
+                      <label className="text-[10px] text-stone-400 font-bold block mb-1">Đơn giá (đ) *</label>
+                      <input type="number" required placeholder="120000" value={srvForm.price}
+                        onChange={e => setSrvForm(f => ({ ...f, price: e.target.value }))}
+                        className="w-full px-3 py-2 bg-stone-50 border border-stone-200 rounded-xl focus:outline-none" />
                     </div>
                     <div>
                       <label className="text-[10px] text-stone-400 font-bold block mb-1">Danh mục</label>
@@ -523,7 +515,7 @@ const EmployeeManagement = () => {
                     </div>
                     <div className="flex gap-2 pt-1">
                       {editingSrvId && (
-                        <button type="button" onClick={() => { setEditingSrvId(null); setSrvForm({ name: "", price: "", category: "nails", duration: "60", description: "" }); }}
+                        <button type="button" onClick={() => { setEditingSrvId(null); setSrvForm({ name: "", price: "", category: "nails", description: "" }); }}
                           className="flex-1 py-2 bg-stone-100 text-stone-600 rounded-xl font-bold">Hủy</button>
                       )}
                       <button type="submit" className="flex-grow py-2 bg-[#9E5E6F] hover:bg-[#8D5060] text-white rounded-xl font-bold transition flex items-center justify-center gap-1">
@@ -838,7 +830,7 @@ const QrIconInline = () => (
 
 // ── Service List Panel with Tab Filter + Search ────────────────────────────────
 interface ServiceListPanelProps {
-  services: { _id: string; name: string; price: number; category: string; duration: number; description?: string }[];
+  services: { _id: string; name: string; price: number; category: string; duration?: number; description?: string }[];
   onEdit: (s: any) => void;
   onDelete: (id: string) => void;
   formatPrice: (p: number) => string;
@@ -952,7 +944,7 @@ const ServiceListPanel = ({ services, onEdit, onDelete, formatPrice }: ServiceLi
                 {/* Info */}
                 <div className="flex-1 min-w-0">
                   <p className="text-xs font-semibold text-stone-800 truncate">{s.name}</p>
-                  <p className="text-[10px] text-stone-400">{s.duration} phút</p>
+                  {s.description && <p className="text-[10px] text-stone-400 truncate">{s.description}</p>}
                 </div>
 
                 {/* Price */}

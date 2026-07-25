@@ -8,7 +8,7 @@ interface ServiceItem {
   name: string;
   price: number;
   category: "nails" | "eyelashes" | "washing" | "makeup";
-  duration: number;
+  duration?: number;
   description?: string;
 }
 
@@ -196,10 +196,6 @@ const About = () => {
                       <div key={srv._id} className="p-5 flex items-start justify-between gap-4">
                         <div className="space-y-1">
                           <h4 className="font-bold text-stone-850 text-[13px] leading-snug">{srv.name}</h4>
-                          <div className="flex items-center gap-1 text-[10px] text-stone-400">
-                            <Clock className="w-3 h-3" />
-                            <span>{srv.duration} phút</span>
-                          </div>
                           {srv.description && (
                             <p className="text-[10.5px] text-stone-500 leading-relaxed pt-0.5">{srv.description}</p>
                           )}

@@ -34,7 +34,7 @@ const checkConflict = async (date, time, services, ignoreBookingId = null) => {
   const start = new Date(year, month - 1, day, hour, minute, 0);
 
   const dbServices = await Service.find({ name: { $in: services } });
-  const duration = dbServices.reduce((sum, s) => sum + s.duration, 0) || 60;
+  const duration = dbServices.reduce((sum, s) => sum + (s.duration || 60), 0) || 60;
   const end = new Date(start.getTime() + duration * 60000);
 
   const hasNail = dbServices.some(s => s.category === 'nails' || s.category === 'eyelashes');
@@ -64,7 +64,7 @@ const checkConflict = async (date, time, services, ignoreBookingId = null) => {
     const bStart = new Date(bYear, bMonth - 1, bDay, bHour, bMinute, 0);
 
     const bDbServices = await Service.find({ name: { $in: b.services } });
-    const bDuration = bDbServices.reduce((sum, s) => sum + s.duration, 0) || 60;
+    const bDuration = bDbServices.reduce((sum, s) => sum + (s.duration || 60), 0) || 60;
     const bEnd = new Date(bStart.getTime() + bDuration * 60000);
 
     if (bStart.getTime() < end.getTime() && start.getTime() < bEnd.getTime()) {
