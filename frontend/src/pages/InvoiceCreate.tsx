@@ -171,11 +171,11 @@ const InvoiceCreate = () => {
         const d = await res.json();
         setCustomerName(d.name); setCustomerPoints(d.points);
         setIsNewCustomer(false);
-        toast.success(`Khách hàng: ${d.name} — ${d.points} điểm`);
+        toast.success(`Đã tìm thấy: ${d.name}`);
       } else {
         setIsNewCustomer(true);
         setCustomerName(""); setCustomerPoints(0);
-        toast.info("Khách hàng mới — nhập tên để đăng ký thành viên");
+        toast.info("Khách hàng mới — nhập tên để lưu thông tin");
       }
     } catch { toast.error("Lỗi kết nối"); }
     finally { setCheckingCustomer(false); }
@@ -252,7 +252,7 @@ const InvoiceCreate = () => {
     if (!selectedEmployee) { toast.warning("Chọn thợ làm dịch vụ"); return; }
     if (selectedServices.length === 0) { toast.warning("Thêm ít nhất 1 dịch vụ"); return; }
     if (isNewCustomer && customerPhone && !customerName.trim()) {
-      toast.warning("Nhập tên khách hàng mới để đăng ký tích điểm");
+      toast.warning("Nhập tên khách hàng");
       return;
     }
 
@@ -352,7 +352,7 @@ const InvoiceCreate = () => {
   return (
     <div className="min-h-screen bg-[#FDFBF7] pb-20">
       {/* ── Header ── */}
-      <div className="bg-[#9E5E6F] text-white py-4 px-5 flex items-center justify-between shadow-lg sticky top-0 z-30">
+      <div className="bg-[#9E5E6F] text-white py-4 px-5 flex items-center justify-between shadow-lg fixed top-0 left-0 right-0 z-30">
         <div className="flex items-center gap-3">
           <Link to="/employee/dashboard" className="p-1.5 hover:bg-white/15 rounded-full transition">
             <ArrowLeft className="w-5 h-5" />
@@ -369,14 +369,14 @@ const InvoiceCreate = () => {
         )}
       </div>
 
-      <div className="max-w-5xl mx-auto px-4 mt-5 grid grid-cols-1 lg:grid-cols-5 gap-5">
+      <div className="max-w-5xl mx-auto px-4 mt-[73px] grid grid-cols-1 lg:grid-cols-5 gap-5">
 
         {/* ══ LEFT: Service picker ══════════════════════════════════════════ */}
         <div className="lg:col-span-3 space-y-4">
 
           {/* Customer lookup */}
           <div className="bg-white rounded-2xl p-4 border border-stone-200/60 shadow-sm">
-            <p className="text-[10px] font-bold text-stone-400 uppercase tracking-wider mb-2.5">Khách Hàng Tích Điểm</p>
+            <p className="text-[10px] font-bold text-stone-400 uppercase tracking-wider mb-2.5">Thông Tin Khách Hàng</p>
             <div className="flex gap-2">
               <div className="relative flex-1">
                 <Phone className="w-3.5 h-3.5 text-stone-400 absolute left-3 top-1/2 -translate-y-1/2" />
@@ -412,12 +412,14 @@ const InvoiceCreate = () => {
                   <p className="text-[10px] text-stone-400">Thành viên</p>
                   <p className="font-bold text-stone-800">{customerName}</p>
                 </div>
+                {/* ── LOYALTY POINTS DISABLED: điểm hiện tại ẩn tạm ──
                 {customerPoints !== null && (
                   <div className="text-right">
                     <p className="text-[10px] text-stone-400">Điểm hiện tại</p>
                     <p className="font-bold text-[#9E5E6F] font-serif text-sm">{customerPoints} điểm</p>
                   </div>
                 )}
+            ── END LOYALTY DISABLED ── */
               </div>
             )}
 
@@ -428,7 +430,7 @@ const InvoiceCreate = () => {
                   <BadgePlus className="w-4 h-4 text-emerald-600 shrink-0" />
                   <div className="flex-1">
                     <p className="text-[10px] font-bold text-emerald-700">Khách hàng mới</p>
-                    <p className="text-[10px] text-emerald-600">Nhập tên để đăng ký thành viên tích điểm</p>
+                    <p className="text-[10px] text-emerald-600">Nhập tên để lưu thông tin khách hàng</p>
                   </div>
                 </div>
                 <input

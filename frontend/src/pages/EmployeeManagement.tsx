@@ -4,6 +4,7 @@ import { ArrowLeft, UserPlus, Save, Edit2, Trash, RefreshCw, Scissors, Landmark,
 import { toast } from "sonner";
 import { API_BASE, authFetch, getSession } from "../config";
 import { compressAvatar, compressQRImage, getBase64SizeKB } from "../lib/imageUtils";
+import { BankSelect } from "../components/BankSelect";
 
 interface Employee {
   _id: string;
@@ -87,16 +88,7 @@ type RankTierKey = typeof RANK_TIERS[number]["key"];
 
 const benefitsKey = (tier: RankTierKey) => `${tier}Benefits` as keyof RankSettings;
 
-const BANK_OPTIONS = [
-  { id: "mbbank", name: "MB Bank" },
-  { id: "vietcombank", name: "Vietcombank" },
-  { id: "techcombank", name: "Techcombank" },
-  { id: "bidv", name: "BIDV" },
-  { id: "vietinbank", name: "Vietinbank" },
-  { id: "tpbank", name: "TPBank" },
-  { id: "acb", name: "ACB" },
-  { id: "vpbank", name: "VPBank" },
-];
+// Bank options are now handled by BankSelect component (full list in vietnamBanks.ts)
 
 const EmployeeManagement = () => {
   const navigate = useNavigate();
@@ -808,14 +800,10 @@ const EmployeeManagement = () => {
                   <form onSubmit={handleBankSubmit} className="space-y-3 text-xs">
                     <div>
                       <label className="text-[10px] text-stone-400 font-bold block mb-1">Ngân hàng</label>
-                      <select value={bankForm.bankId}
-                        onChange={e => {
-                          const opt = BANK_OPTIONS.find(b => b.id === e.target.value);
-                          setBankForm(f => ({ ...f, bankId: e.target.value, bankName: opt?.name || "" }));
-                        }}
-                        className="w-full px-3 py-2 bg-stone-50 border border-stone-200 rounded-xl focus:outline-none">
-                        {BANK_OPTIONS.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
-                      </select>
+                      <BankSelect
+                        value={bankForm.bankId}
+                        onChange={(id, name) => setBankForm(f => ({ ...f, bankId: id, bankName: name }))}
+                      />
                     </div>
                     <div>
                       <label className="text-[10px] text-stone-400 font-bold block mb-1">Số tài khoản *</label>

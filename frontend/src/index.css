@@ -49,6 +49,20 @@
     @apply bg-background text-foreground;
     font-feature-settings: "rlig" 1, "calt" 1;
   }
+
+  /* ── Prevent iOS PWA auto-zoom when tapping inputs ──
+     iOS Safari zooms in when input font-size < 16px.
+     We scale visually but keep layout size via transform. */
+  input[type="text"],
+  input[type="tel"],
+  input[type="email"],
+  input[type="number"],
+  input[type="password"],
+  input[type="search"],
+  textarea,
+  select {
+    font-size: 16px;
+  }
 }
 
 /* Tabular numbers for price columns */
