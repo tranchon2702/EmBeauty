@@ -352,7 +352,10 @@ const InvoiceCreate = () => {
     <div className="min-h-screen bg-[#F4EFEB]/40 pb-28">
 
       {/* ── Fixed Header ── */}
-      <div className="bg-[#9E5E6F] text-white py-3.5 px-5 flex items-center justify-between shadow-lg fixed top-0 left-0 right-0 z-30">
+      <div
+        className="bg-[#9E5E6F] text-white px-5 flex items-center justify-between shadow-lg fixed top-0 left-0 right-0 z-30"
+        style={{ paddingTop: "calc(env(safe-area-inset-top) + 12px)", paddingBottom: "12px" }}
+      >
         <div className="flex items-center gap-3">
           <Link to="/employee/dashboard" className="p-1.5 hover:bg-white/15 rounded-full transition">
             <ArrowLeft className="w-5 h-5" />
@@ -369,7 +372,7 @@ const InvoiceCreate = () => {
         )}
       </div>
 
-      <div className="pt-[57px]">
+      <div style={{ paddingTop: "calc(env(safe-area-inset-top) + 57px)" }}>
 
         {/* ── Staff Selector (avatar chips) ── */}
         <div className="bg-white border-b border-stone-100 px-4 py-3">
