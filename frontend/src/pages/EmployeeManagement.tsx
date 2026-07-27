@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useRef } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { ArrowLeft, UserPlus, Save, Edit2, Trash, RefreshCw, Scissors, Landmark, Percent, Send, CheckCircle, Camera, Bot, Info, MessageSquare, Plus, X } from "lucide-react";
+import { ArrowLeft, UserPlus, Save, Edit2, Trash, RefreshCw, Scissors, Landmark, Percent, Camera, MessageSquare, Plus, X, KeyRound, Tags, Gift, Eye, EyeOff } from "lucide-react";
 import { toast } from "sonner";
-import { API_BASE } from "../config";
+import { API_BASE, authFetch, getSession } from "../config";
 import { compressAvatar, compressQRImage, getBase64SizeKB } from "../lib/imageUtils";
 
 interface Employee {
@@ -20,9 +20,17 @@ interface Service {
   _id: string;
   name: string;
   price: number;
-  category: "nails" | "eyelashes" | "washing" | "makeup";
-  duration?: number;
+  category: string;
   description?: string;
+  isActive?: boolean;
+}
+
+interface Category {
+  _id: string;
+  key: string;
+  name: string;
+  icon: string;
+  order: number;
 }
 
 interface BankAccount {
@@ -35,11 +43,18 @@ interface BankAccount {
   qrImageBase64?: string;
 }
 
+interface RankSettings {
+  silverMinPoints: number;
+  goldMinPoints: number;
+  diamondMinPoints: number;
+  bronzeBenefits: string[];
+  silverBenefits: string[];
+  goldBenefits: string[];
+  diamondBenefits: string[];
+}
+
 interface SettingsData {
   pointRewardRate: number;
-  telegramBotToken: string;
-  telegramChatId: string;
-  telegramNotificationsEnabled: boolean;
   salonName: string;
   salonPhone: string;
   salonAddress: string;
@@ -47,14 +62,30 @@ interface SettingsData {
   googleMapsUrl: string;
   facebookUrl: string;
   welcomeMessages: string[];
+  rankSettings: RankSettings;
 }
 
-const CATEGORY_LABEL: Record<string, string> = {
-  nails: "💅 Nails",
-  eyelashes: "✨ Nối Mi",
-  washing: "🧴 Gội Đầu",
-  makeup: "💄 Makeup",
+const DEFAULT_RANK_SETTINGS: RankSettings = {
+  silverMinPoints: 50,
+  goldMinPoints: 100,
+  diamondMinPoints: 200,
+  bronzeBenefits: [],
+  silverBenefits: [],
+  goldBenefits: [],
+  diamondBenefits: [],
 };
+
+/** The four loyalty tiers, in the order they are displayed to the customer. */
+const RANK_TIERS = [
+  { key: "bronze", label: "Đồng", icon: "🥉", tone: "bg-[#F4EAE0] border-[#E3D2C1] text-[#8D6E52]" },
+  { key: "silver", label: "Bạc", icon: "🥈", tone: "bg-slate-50 border-slate-200 text-slate-700" },
+  { key: "gold", label: "Vàng", icon: "🥇", tone: "bg-amber-50 border-amber-200 text-amber-800" },
+  { key: "diamond", label: "Kim Cương", icon: "💎", tone: "bg-cyan-50 border-cyan-200 text-cyan-800" },
+] as const;
+
+type RankTierKey = typeof RANK_TIERS[number]["key"];
+
+const benefitsKey = (tier: RankTierKey) => `${tier}Benefits` as keyof RankSettings;
 
 const BANK_OPTIONS = [
   { id: "mbbank", name: "MB Bank" },
@@ -69,19 +100,17 @@ const BANK_OPTIONS = [
 
 const EmployeeManagement = () => {
   const navigate = useNavigate();
-  const [activeTab, setActiveTab] = useState<"staff" | "services" | "banks" | "settings">("staff");
+  const [activeTab, setActiveTab] = useState<"staff" | "services" | "categories" | "banks" | "settings">("staff");
   const [loading, setLoading] = useState(true);
   const avatarFileRef = useRef<HTMLInputElement>(null);
   const qrFileRef = useRef<HTMLInputElement>(null);
 
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [services, setServices] = useState<Service[]>([]);
+  const [categories, setCategories] = useState<Category[]>([]);
   const [bankAccounts, setBankAccounts] = useState<BankAccount[]>([]);
   const [settings, setSettings] = useState<SettingsData>({
     pointRewardRate: 10,
-    telegramBotToken: "",
-    telegramChatId: "",
-    telegramNotificationsEnabled: false,
     salonName: "EM Beauty Nails & Makeup",
     salonPhone: "035 836 7919",
     salonAddress: "64 Linh Trung, Linh Xuân, TP.HCM",
@@ -89,8 +118,10 @@ const EmployeeManagement = () => {
     googleMapsUrl: "https://maps.app.goo.gl/DruZXXTrtSVBj6LW9",
     facebookUrl: "https://www.facebook.com/thai.ngoc.quynh.nhu?locale=vi_VN",
     welcomeMessages: [],
+    rankSettings: DEFAULT_RANK_SETTINGS,
   });
   const [newVibe, setNewVibe] = useState("");
+  const [newBenefit, setNewBenefit] = useState<Record<string, string>>({});
 
   // Employee form
   const [editingEmpId, setEditingEmpId] = useState<string | null>(null);
@@ -98,17 +129,26 @@ const EmployeeManagement = () => {
 
   // Service form
   const [editingSrvId, setEditingSrvId] = useState<string | null>(null);
-  const [srvForm, setSrvForm] = useState({ name: "", price: "", category: "nails" as Service["category"], description: "" });
+  const [srvForm, setSrvForm] = useState({ name: "", price: "", category: "", description: "", isActive: true });
+
+  // Category form
+  const [editingCatId, setEditingCatId] = useState<string | null>(null);
+  const [catForm, setCatForm] = useState({ name: "", icon: "✨" });
 
   // Bank form
   const [editingBankId, setEditingBankId] = useState<string | null>(null);
   const [bankForm, setBankForm] = useState({ bankId: "mbbank", bankName: "MB Bank", accountNumber: "", accountHolder: "", displayName: "", qrImageBase64: "" });
 
-  // Admin check
+  // Reset PIN modal
+  const [resetPinEmpId, setResetPinEmpId] = useState<string | null>(null);
+  const [resetPinName, setResetPinName] = useState("");
+  const [resetPinValue, setResetPinValue] = useState("");
+  const [resetPinLoading, setResetPinLoading] = useState(false);
+
+
   useEffect(() => {
-    const raw = localStorage.getItem("embeauty_session");
-    if (!raw) { navigate("/staff"); return; }
-    const s = JSON.parse(raw);
+    const s = getSession();
+    if (!s) { navigate("/staff"); return; }
     if (s.role !== "admin") {
       toast.error("Chỉ quản trị viên mới có quyền truy cập");
       navigate("/employee/dashboard");
@@ -118,22 +158,26 @@ const EmployeeManagement = () => {
   const fetchAll = async () => {
     setLoading(true);
     try {
-      const [empRes, srvRes, bankRes, settRes] = await Promise.all([
-        fetch(`${API_BASE}/employees`),
-        fetch(`${API_BASE}/services`),
-        fetch(`${API_BASE}/bank-accounts`),
-        fetch(`${API_BASE}/settings`),
+      const [empRes, srvRes, catRes, bankRes, settRes] = await Promise.all([
+        authFetch(`${API_BASE}/employees`),
+        authFetch(`${API_BASE}/services`),
+        authFetch(`${API_BASE}/categories`),
+        authFetch(`${API_BASE}/bank-accounts`),
+        authFetch(`${API_BASE}/settings`),
       ]);
       if (empRes.ok) setEmployees(await empRes.json());
       if (srvRes.ok) setServices(await srvRes.json());
+      if (catRes.ok) {
+        const cats: Category[] = await catRes.json();
+        setCategories(cats);
+        // Keep the service form pointing at a category that actually exists.
+        setSrvForm(f => (f.category || cats.length === 0 ? f : { ...f, category: cats[0].key }));
+      }
       if (bankRes.ok) setBankAccounts(await bankRes.json());
       if (settRes.ok) {
         const s = await settRes.json();
         setSettings({
-          pointRewardRate: s.pointRewardRate || 10,
-          telegramBotToken: s.telegramBotToken || "",
-          telegramChatId: s.telegramChatId || "",
-          telegramNotificationsEnabled: s.telegramNotificationsEnabled || false,
+          pointRewardRate: s.pointRewardRate ?? 10,
           salonName: s.salonName || "EM Beauty Nails & Makeup",
           salonPhone: s.salonPhone || "035 836 7919",
           salonAddress: s.salonAddress || "64 Linh Trung, Linh Xuân, TP.HCM",
@@ -141,10 +185,31 @@ const EmployeeManagement = () => {
           googleMapsUrl: s.googleMapsUrl || "https://maps.app.goo.gl/DruZXXTrtSVBj6LW9",
           facebookUrl: s.facebookUrl || "https://www.facebook.com/thai.ngoc.quynh.nhu?locale=vi_VN",
           welcomeMessages: s.welcomeMessages || [],
+          // Must be hydrated from the server: leaving it out made the form fall
+          // back to defaults and silently overwrite the saved tiers on save.
+          rankSettings: { ...DEFAULT_RANK_SETTINGS, ...(s.rankSettings || {}) },
         });
       }
     } catch { toast.error("Lỗi tải dữ liệu"); }
     finally { setLoading(false); }
+  };
+
+  // ── Rank settings helpers ─────────────────────────────────────────────────
+  const patchRank = (patch: Partial<RankSettings>) =>
+    setSettings(s => ({ ...s, rankSettings: { ...s.rankSettings, ...patch } }));
+
+  const addBenefit = (tier: RankTierKey) => {
+    const text = (newBenefit[tier] || "").trim();
+    if (!text) return;
+    const key = benefitsKey(tier);
+    patchRank({ [key]: [...(settings.rankSettings[key] as string[]), text] } as Partial<RankSettings>);
+    setNewBenefit(b => ({ ...b, [tier]: "" }));
+  };
+
+  const removeBenefit = (tier: RankTierKey, index: number) => {
+    const key = benefitsKey(tier);
+    const list = settings.rankSettings[key] as string[];
+    patchRank({ [key]: list.filter((_, i) => i !== index) } as Partial<RankSettings>);
   };
 
   useEffect(() => { fetchAll(); }, []);
@@ -180,14 +245,20 @@ const EmployeeManagement = () => {
   // ── Employee CRUD ─────────────────────────────────────────────────────────
   const handleEmpSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!empForm.name || !empForm.phone || !empForm.pin) { toast.warning("Điền đủ Tên, SĐT và PIN"); return; }
+    // PIN only required for new employees
+    if (!empForm.name || !empForm.phone) { toast.warning("Điền đủ Tên và SĐT"); return; }
+    if (!editingEmpId && !empForm.pin) { toast.warning("Mã PIN là bắt buộc khi tạo nhân viên mới"); return; }
     try {
       const url = editingEmpId ? `${API_BASE}/employees/${editingEmpId}` : `${API_BASE}/employees`;
       const method = editingEmpId ? "PUT" : "POST";
-      const res = await fetch(url, {
+      // When editing, don't send PIN (it's hashed and managed via reset-pin)
+      const payload = editingEmpId
+        ? { name: empForm.name, phone: empForm.phone, role: empForm.role, bio: empForm.bio, avatar: empForm.avatar }
+        : empForm;
+      const res = await authFetch(url, {
         method,
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(empForm),
+        body: JSON.stringify(payload),
       });
       if (!res.ok) throw new Error((await res.json()).message);
       toast.success(editingEmpId ? "Cập nhật nhân viên thành công" : "Thêm nhân viên mới thành công");
@@ -199,46 +270,130 @@ const EmployeeManagement = () => {
 
   const handleEditEmp = (emp: Employee) => {
     setEditingEmpId(emp._id);
-    setEmpForm({ name: emp.name, phone: emp.phone, pin: emp.pin, role: emp.role, bio: emp.bio || "", avatar: emp.avatar || "" });
+    setEmpForm({ name: emp.name, phone: emp.phone, pin: "", role: emp.role, bio: emp.bio || "", avatar: emp.avatar || "" });
   };
 
   const handleDeleteEmp = async (id: string) => {
     if (!confirm("Vô hiệu hóa nhân viên này?")) return;
-    await fetch(`${API_BASE}/employees/${id}`, { method: "DELETE" });
+    await authFetch(`${API_BASE}/employees/${id}`, { method: "DELETE" });
     toast.success("Đã vô hiệu hóa nhân viên");
     fetchAll();
   };
 
+  // ── Reset PIN (admin) ─────────────────────────────────────────────────────
+  const handleResetPin = async () => {
+    if (!resetPinEmpId || !resetPinValue || resetPinValue.length !== 4) {
+      toast.warning("Mã PIN mới phải là 4 chữ số");
+      return;
+    }
+    setResetPinLoading(true);
+    try {
+      const res = await authFetch(`${API_BASE}/employees/${resetPinEmpId}/reset-pin`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ newPin: resetPinValue }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.message);
+      toast.success(data.message);
+      setResetPinEmpId(null);
+      setResetPinName("");
+      setResetPinValue("");
+    } catch (err: any) {
+      toast.error(err.message || "Lỗi đặt lại PIN");
+    } finally {
+      setResetPinLoading(false);
+    }
+  };
+
   // ── Service CRUD ──────────────────────────────────────────────────────────
+  const blankSrvForm = () => ({
+    name: "", price: "", category: categories[0]?.key || "", description: "", isActive: true,
+  });
+
   const handleSrvSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!srvForm.name || !srvForm.price) { toast.warning("Điền đủ thông tin dịch vụ"); return; }
+    if (!srvForm.name.trim()) { toast.warning("Nhập tên dịch vụ"); return; }
+    if (srvForm.price === "" || Number(srvForm.price) < 0) { toast.warning("Đơn giá phải là số không âm"); return; }
+    if (!srvForm.category) { toast.warning("Chọn danh mục cho dịch vụ"); return; }
     try {
       const url = editingSrvId ? `${API_BASE}/services/${editingSrvId}` : `${API_BASE}/services`;
-      const method = editingSrvId ? "PUT" : "POST";
-      const res = await fetch(url, {
-        method,
+      const res = await authFetch(url, {
+        method: editingSrvId ? "PUT" : "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ ...srvForm, price: Number(srvForm.price) }),
       });
-      if (!res.ok) throw new Error();
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.message);
       toast.success(editingSrvId ? "Cập nhật dịch vụ thành công" : "Thêm dịch vụ mới");
-      setSrvForm({ name: "", price: "", category: "nails", description: "" });
+      setSrvForm(blankSrvForm());
       setEditingSrvId(null);
       fetchAll();
-    } catch { toast.error("Lỗi lưu dịch vụ"); }
+    } catch (err: any) { toast.error(err.message || "Lỗi lưu dịch vụ"); }
   };
 
   const handleEditSrv = (s: Service) => {
     setEditingSrvId(s._id);
-    setSrvForm({ name: s.name, price: String(s.price), category: s.category, description: s.description || "" });
+    setSrvForm({
+      name: s.name,
+      price: String(s.price),
+      category: s.category,
+      description: s.description || "",
+      isActive: s.isActive !== false,
+    });
   };
 
   const handleDeleteSrv = async (id: string) => {
-    if (!confirm("Xóa dịch vụ này?")) return;
-    await fetch(`${API_BASE}/services/${id}`, { method: "DELETE" });
+    if (!confirm("Xóa hẳn dịch vụ này? Nếu chỉ muốn tạm ngừng bán, hãy dùng nút Ẩn.")) return;
+    await authFetch(`${API_BASE}/services/${id}`, { method: "DELETE" });
     toast.success("Đã xóa dịch vụ");
     fetchAll();
+  };
+
+  /** Pause a service instead of deleting it — history and reports stay intact. */
+  const handleToggleSrvActive = async (s: Service) => {
+    const next = s.isActive === false;
+    try {
+      const res = await authFetch(`${API_BASE}/services/${s._id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ isActive: next }),
+      });
+      if (!res.ok) throw new Error((await res.json()).message);
+      toast.success(next ? `Đã hiện lại "${s.name}"` : `Đã tạm ẩn "${s.name}"`);
+      fetchAll();
+    } catch (err: any) { toast.error(err.message || "Lỗi cập nhật dịch vụ"); }
+  };
+
+  // ── Category CRUD ─────────────────────────────────────────────────────────
+  const handleCatSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!catForm.name.trim()) { toast.warning("Nhập tên danh mục"); return; }
+    try {
+      const url = editingCatId ? `${API_BASE}/categories/${editingCatId}` : `${API_BASE}/categories`;
+      const res = await authFetch(url, {
+        method: editingCatId ? "PUT" : "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: catForm.name.trim(), icon: catForm.icon || "✨" }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.message);
+      toast.success(editingCatId ? "Đã cập nhật danh mục" : "Đã thêm danh mục");
+      setCatForm({ name: "", icon: "✨" });
+      setEditingCatId(null);
+      fetchAll();
+    } catch (err: any) { toast.error(err.message || "Lỗi lưu danh mục"); }
+  };
+
+  const handleDeleteCat = async (cat: Category) => {
+    if (!confirm(`Xóa danh mục "${cat.name}"?`)) return;
+    try {
+      const res = await authFetch(`${API_BASE}/categories/${cat._id}`, { method: "DELETE" });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.message);
+      toast.success("Đã xóa danh mục");
+      fetchAll();
+    } catch (err: any) { toast.error(err.message || "Lỗi xóa danh mục"); }
   };
 
   // ── Bank CRUD ─────────────────────────────────────────────────────────────
@@ -251,7 +406,7 @@ const EmployeeManagement = () => {
     try {
       const url = editingBankId ? `${API_BASE}/bank-accounts/${editingBankId}` : `${API_BASE}/bank-accounts`;
       const method = editingBankId ? "PUT" : "POST";
-      const res = await fetch(url, {
+      const res = await authFetch(url, {
         method,
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(bankForm),
@@ -274,7 +429,7 @@ const EmployeeManagement = () => {
 
   const handleDeleteBank = async (id: string) => {
     if (!confirm("Xóa tài khoản này?")) return;
-    await fetch(`${API_BASE}/bank-accounts/${id}`, { method: "DELETE" });
+    await authFetch(`${API_BASE}/bank-accounts/${id}`, { method: "DELETE" });
     toast.success("Đã xóa tài khoản");
     fetchAll();
   };
@@ -283,30 +438,17 @@ const EmployeeManagement = () => {
   const handleSaveSettings = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      const res = await fetch(`${API_BASE}/settings`, {
+      const res = await authFetch(`${API_BASE}/settings`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(settings),
       });
-      if (!res.ok) throw new Error();
-      toast.success("Lưu cấu hình thành công!");
-    } catch { toast.error("Lỗi lưu cấu hình"); }
-  };
-
-  const handleTestTelegram = async () => {
-    try {
-      const saveRes = await fetch(`${API_BASE}/settings`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(settings),
-      });
-      if (!saveRes.ok) throw new Error("Lưu cấu hình thất bại");
-
-      const res = await fetch(`${API_BASE}/settings/telegram-test`, { method: "POST" });
       const data = await res.json();
-      if (data.success) toast.success(data.message);
-      else toast.error(data.message);
-    } catch (err: any) { toast.error(err.message || "Lỗi kiểm tra Telegram"); }
+      if (!res.ok) throw new Error(data.message);
+      // Adopt what the server actually stored, so the form never drifts.
+      setSettings(s => ({ ...s, rankSettings: { ...DEFAULT_RANK_SETTINGS, ...(data.rankSettings || {}) } }));
+      toast.success("Lưu cấu hình thành công!");
+    } catch (err: any) { toast.error(err.message || "Lỗi lưu cấu hình"); }
   };
 
   const formatPrice = (p: number) => p.toLocaleString("vi-VN") + "đ";
@@ -314,6 +456,7 @@ const EmployeeManagement = () => {
   const TABS = [
     { key: "staff", label: "👤 Nhân Viên" },
     { key: "services", label: "💅 Dịch Vụ" },
+    { key: "categories", label: "🏷️ Danh Mục" },
     { key: "banks", label: "🏦 Tài Khoản QR" },
     { key: "settings", label: "⚙️ Cấu Hình" },
   ] as const;
@@ -459,11 +602,18 @@ const EmployeeManagement = () => {
                         </div>
 
                         <div className="flex gap-1 shrink-0">
-                          <button onClick={() => handleEditEmp(emp)} className="p-1.5 hover:bg-white text-[#9E5E6F] rounded-lg transition">
+                          <button onClick={() => handleEditEmp(emp)} className="p-1.5 hover:bg-white text-[#9E5E6F] rounded-lg transition" title="Chỉnh sửa">
                             <Edit2 className="w-3.5 h-3.5" />
                           </button>
+                          <button
+                            onClick={() => { setResetPinEmpId(emp._id); setResetPinName(emp.name); setResetPinValue(""); }}
+                            className="p-1.5 hover:bg-amber-50 text-amber-600 rounded-lg transition"
+                            title="Đặt lại PIN"
+                          >
+                            <KeyRound className="w-3.5 h-3.5" />
+                          </button>
                           {emp.status === "active" && (
-                            <button onClick={() => handleDeleteEmp(emp._id)} className="p-1.5 hover:bg-white text-red-400 rounded-lg transition">
+                            <button onClick={() => handleDeleteEmp(emp._id)} className="p-1.5 hover:bg-white text-red-400 rounded-lg transition" title="Vô hiệu hóa">
                               <Trash className="w-3.5 h-3.5" />
                             </button>
                           )}
@@ -493,19 +643,25 @@ const EmployeeManagement = () => {
                     </div>
                     <div>
                       <label className="text-[10px] text-stone-400 font-bold block mb-1">Đơn giá (đ) *</label>
-                      <input type="number" required placeholder="120000" value={srvForm.price}
+                      <input type="number" required min={0} placeholder="120000" value={srvForm.price}
                         onChange={e => setSrvForm(f => ({ ...f, price: e.target.value }))}
                         className="w-full px-3 py-2 bg-stone-50 border border-stone-200 rounded-xl focus:outline-none" />
+                      <p className="text-[9px] text-stone-300 mt-1">Có thể đặt 0đ cho dịch vụ tặng kèm / khuyến mãi</p>
                     </div>
                     <div>
-                      <label className="text-[10px] text-stone-400 font-bold block mb-1">Danh mục</label>
-                      <select value={srvForm.category} onChange={e => setSrvForm(f => ({ ...f, category: e.target.value as any }))}
-                        className="w-full px-3 py-2 bg-stone-50 border border-stone-200 rounded-xl focus:outline-none">
-                        <option value="nails">💅 Nails (Móng)</option>
-                        <option value="eyelashes">✨ Nối Mi (Eyelashes)</option>
-                        <option value="washing">🧴 Gội Đầu &amp; Massage</option>
-                        <option value="makeup">💄 Makeup</option>
-                      </select>
+                      <label className="text-[10px] text-stone-400 font-bold block mb-1">Danh mục *</label>
+                      {categories.length === 0 ? (
+                        <p className="text-[10px] text-amber-700 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2">
+                          Chưa có danh mục nào — hãy tạo ở tab “Danh Mục” trước.
+                        </p>
+                      ) : (
+                        <select value={srvForm.category} onChange={e => setSrvForm(f => ({ ...f, category: e.target.value }))}
+                          className="w-full px-3 py-2 bg-stone-50 border border-stone-200 rounded-xl focus:outline-none">
+                          {categories.map(c => (
+                            <option key={c._id} value={c.key}>{c.icon} {c.name}</option>
+                          ))}
+                        </select>
+                      )}
                     </div>
                     <div>
                       <label className="text-[10px] text-stone-400 font-bold block mb-1">Mô tả ngắn</label>
@@ -513,9 +669,19 @@ const EmployeeManagement = () => {
                         onChange={e => setSrvForm(f => ({ ...f, description: e.target.value }))}
                         className="w-full px-3 py-2 bg-stone-50 border border-stone-200 rounded-xl focus:outline-none" />
                     </div>
+                    <div className="flex items-center gap-2 pt-1">
+                      <button type="button"
+                        onClick={() => setSrvForm(f => ({ ...f, isActive: !f.isActive }))}
+                        className={`relative w-10 h-5 rounded-full transition shrink-0 ${srvForm.isActive ? "bg-emerald-500" : "bg-stone-300"}`}>
+                        <div className={`absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-all ${srvForm.isActive ? "left-[22px]" : "left-0.5"}`} />
+                      </button>
+                      <span className="text-[10px] font-bold text-stone-500">
+                        {srvForm.isActive ? "Đang bán — hiện trên bảng giá" : "Tạm ẩn — không hiện với khách"}
+                      </span>
+                    </div>
                     <div className="flex gap-2 pt-1">
                       {editingSrvId && (
-                        <button type="button" onClick={() => { setEditingSrvId(null); setSrvForm({ name: "", price: "", category: "nails", description: "" }); }}
+                        <button type="button" onClick={() => { setEditingSrvId(null); setSrvForm(blankSrvForm()); }}
                           className="flex-1 py-2 bg-stone-100 text-stone-600 rounded-xl font-bold">Hủy</button>
                       )}
                       <button type="submit" className="flex-grow py-2 bg-[#9E5E6F] hover:bg-[#8D5060] text-white rounded-xl font-bold transition flex items-center justify-center gap-1">
@@ -528,10 +694,104 @@ const EmployeeManagement = () => {
                 {/* Services list with filter tabs + search */}
                 <ServiceListPanel
                   services={services}
+                  categories={categories}
                   onEdit={handleEditSrv}
                   onDelete={handleDeleteSrv}
+                  onToggleActive={handleToggleSrvActive}
                   formatPrice={formatPrice}
                 />
+              </div>
+            )}
+
+            {/* ── Tab: Categories ── */}
+            {activeTab === "categories" && (
+              <div className="grid grid-cols-1 md:grid-cols-5 gap-5">
+                {/* Form */}
+                <div className="md:col-span-2 bg-white rounded-2xl p-5 border border-stone-200/60 shadow-sm h-fit">
+                  <h2 className="text-xs font-bold text-stone-400 uppercase tracking-wider mb-4 flex items-center gap-1.5">
+                    <Tags className="w-3.5 h-3.5 text-[#9E5E6F]" />
+                    {editingCatId ? "Cập nhật danh mục" : "Thêm danh mục mới"}
+                  </h2>
+                  <form onSubmit={handleCatSubmit} className="space-y-3 text-xs">
+                    <div>
+                      <label className="text-[10px] text-stone-400 font-bold block mb-1">Tên danh mục *</label>
+                      <input type="text" required placeholder="Ví dụ: Chăm sóc da"
+                        value={catForm.name}
+                        onChange={e => setCatForm(f => ({ ...f, name: e.target.value }))}
+                        className="w-full px-3 py-2 bg-stone-50 border border-stone-200 rounded-xl focus:outline-none focus:ring-1 focus:ring-[#9E5E6F]" />
+                    </div>
+                    <div>
+                      <label className="text-[10px] text-stone-400 font-bold block mb-1">Biểu tượng</label>
+                      <div className="flex gap-2 items-center">
+                        <input type="text" maxLength={4} value={catForm.icon}
+                          onChange={e => setCatForm(f => ({ ...f, icon: e.target.value }))}
+                          className="w-16 px-3 py-2 bg-stone-50 border border-stone-200 rounded-xl text-center text-base focus:outline-none" />
+                        <div className="flex flex-wrap gap-1">
+                          {["💅", "✨", "🧴", "💄", "🌸", "💆", "🧖", "👣"].map(emoji => (
+                            <button key={emoji} type="button"
+                              onClick={() => setCatForm(f => ({ ...f, icon: emoji }))}
+                              className="w-7 h-7 rounded-lg bg-stone-50 hover:bg-[#F9ECEF] border border-stone-200 text-sm transition">
+                              {emoji}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                    <p className="text-[10px] text-stone-400 bg-stone-50 rounded-xl p-2.5 leading-relaxed">
+                      Danh mục hiển thị trên bảng giá khách xem và màn hình lập hóa đơn.
+                      Không thể xóa danh mục đang có dịch vụ.
+                    </p>
+                    <div className="flex gap-2 pt-1">
+                      {editingCatId && (
+                        <button type="button"
+                          onClick={() => { setEditingCatId(null); setCatForm({ name: "", icon: "✨" }); }}
+                          className="flex-1 py-2 bg-stone-100 text-stone-600 rounded-xl font-bold">Hủy</button>
+                      )}
+                      <button type="submit" className="flex-grow py-2 bg-[#9E5E6F] hover:bg-[#8D5060] text-white rounded-xl font-bold transition flex items-center justify-center gap-1">
+                        <Save className="w-3.5 h-3.5" /> Lưu danh mục
+                      </button>
+                    </div>
+                  </form>
+                </div>
+
+                {/* Category list */}
+                <div className="md:col-span-3 bg-white rounded-2xl p-5 border border-stone-200/60 shadow-sm">
+                  <h2 className="text-xs font-bold text-stone-400 uppercase tracking-wider mb-4">
+                    Danh mục dịch vụ <span className="text-[#9E5E6F] font-extrabold ml-1">{categories.length}</span>
+                  </h2>
+                  {categories.length === 0 ? (
+                    <p className="text-xs text-stone-400 italic py-8 text-center">Chưa có danh mục nào</p>
+                  ) : (
+                    <div className="space-y-2">
+                      {categories.map(cat => {
+                        const count = services.filter(s => s.category === cat.key).length;
+                        return (
+                          <div key={cat._id} className="flex items-center gap-3 p-3 bg-stone-50 rounded-xl border border-stone-100">
+                            <span className="text-xl shrink-0">{cat.icon}</span>
+                            <div className="flex-1 min-w-0">
+                              <p className="text-xs font-bold text-stone-800">{cat.name}</p>
+                              <p className="text-[10px] text-stone-400 font-mono">{cat.key} • {count} dịch vụ</p>
+                            </div>
+                            <div className="flex gap-1 shrink-0">
+                              <button
+                                onClick={() => { setEditingCatId(cat._id); setCatForm({ name: cat.name, icon: cat.icon }); }}
+                                className="p-1.5 text-[#9E5E6F] hover:bg-white rounded-lg transition" title="Sửa">
+                                <Edit2 className="w-3.5 h-3.5" />
+                              </button>
+                              <button
+                                onClick={() => handleDeleteCat(cat)}
+                                disabled={count > 0}
+                                title={count > 0 ? `Còn ${count} dịch vụ trong danh mục này` : "Xóa"}
+                                className="p-1.5 text-red-400 hover:bg-white rounded-lg transition disabled:opacity-25 disabled:cursor-not-allowed">
+                                <Trash className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
               </div>
             )}
 
@@ -690,57 +950,122 @@ const EmployeeManagement = () => {
                       <Percent className="w-3.5 h-3.5 text-primary" /> Tích điểm thành viên
                     </h2>
                     <div className="flex items-center gap-3 text-xs">
-                      <input type="number" min={1} max={100} value={settings.pointRewardRate}
+                      <input type="number" min={0} max={100} value={settings.pointRewardRate}
                         onChange={e => setSettings(s => ({ ...s, pointRewardRate: Number(e.target.value) }))}
                         className="w-20 px-3 py-2 bg-stone-50 border border-stone-200 rounded-xl text-center font-bold focus:outline-none" />
-                      <p className="text-stone-500">% giá trị hóa đơn → điểm tích lũy<br /><span className="text-[10px] text-stone-400">Ví dụ: 10% → Hóa đơn 200,000đ = 20 điểm</span></p>
+                      <p className="text-stone-500">
+                        Mức tích điểm
+                        <br />
+                        <span className="text-[10px] text-stone-400">
+                          Với mức {settings.pointRewardRate || 0}: hóa đơn 200.000đ ={" "}
+                          <strong className="text-[#9E5E6F]">
+                            {Math.floor((200000 * (settings.pointRewardRate || 0)) / 100000)} điểm
+                          </strong>
+                        </span>
+                      </p>
                     </div>
                   </div>
 
-                  {/* Telegram hidden temporarily */}
-                  {/*
-                  <div className="bg-white rounded-2xl p-5 border border-stone-200/60 shadow-sm">
-                    <h2 className="text-xs font-bold text-stone-400 uppercase tracking-wider mb-1 flex items-center gap-1.5">
-                      <Bot className="w-3.5 h-3.5 text-[#9E5E6F]" /> Thông báo Telegram Bot
+                  {/* Loyalty tiers: thresholds + the benefits shown on the
+                      customer's membership card at /tick */}
+                  <div className="bg-white rounded-2xl p-5 border border-stone-200/60 shadow-sm space-y-4">
+                    <h2 className="text-xs font-bold text-stone-400 uppercase tracking-wider flex items-center gap-1.5">
+                      <Gift className="w-3.5 h-3.5 text-[#9E5E6F]" /> Hạng thẻ thành viên
                     </h2>
-                    <p className="text-[10px] text-stone-400 mb-4 flex items-start gap-1">
-                      <Info className="w-3 h-3 shrink-0 mt-0.5" />
-                      Tạo bot tại @BotFather trên Telegram → Lấy Token → Gửi tin nhắn cho bot → Lấy Chat ID tại api.telegram.org/bot&#123;TOKEN&#125;/getUpdates
+                    <p className="text-[10px] text-stone-400 leading-relaxed">
+                      Mốc điểm và quyền lợi bên dưới hiển thị trực tiếp trên thẻ thành viên của khách
+                      tại trang <span className="font-mono text-stone-500">/tick</span>.
+                      Hạng tính theo <strong>tổng điểm tích lũy trọn đời</strong> nên khách không bị tụt hạng.
                     </p>
 
-                    <div className="space-y-3 text-xs">
-                      <div className="flex items-center gap-3">
-                        <label className="text-[10px] font-bold text-stone-500 shrink-0">Kích hoạt:</label>
-                        <button type="button"
-                          onClick={() => setSettings(s => ({ ...s, telegramNotificationsEnabled: !s.telegramNotificationsEnabled }))}
-                          className={`relative w-10 h-5 rounded-full transition ${settings.telegramNotificationsEnabled ? "bg-[#9E5E6F]" : "bg-stone-200"}`}>
-                          <div className={`absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-all ${settings.telegramNotificationsEnabled ? "left-5.5" : "left-0.5"}`} />
-                        </button>
-                        <span className={`text-[10px] font-bold ${settings.telegramNotificationsEnabled ? "text-[#9E5E6F]" : "text-stone-400"}`}>
-                          {settings.telegramNotificationsEnabled ? "Đang bật" : "Đang tắt"}
-                        </span>
-                      </div>
+                    {/* Thresholds */}
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
+                      {([
+                        { key: "silverMinPoints", label: "Mốc Bạc", icon: "🥈", tone: "bg-slate-50 border-slate-200/60 text-slate-700" },
+                        { key: "goldMinPoints", label: "Mốc Vàng", icon: "🥇", tone: "bg-amber-50 border-amber-200/60 text-amber-800" },
+                        { key: "diamondMinPoints", label: "Mốc Kim Cương", icon: "💎", tone: "bg-cyan-50 border-cyan-200/60 text-cyan-800" },
+                      ] as const).map(field => (
+                        <div key={field.key} className={`border rounded-xl p-3 ${field.tone}`}>
+                          <label className="text-[10px] font-bold block mb-1">
+                            {field.icon} {field.label}
+                          </label>
+                          <div className="flex items-center gap-1">
+                            <input
+                              type="number"
+                              min={0}
+                              value={settings.rankSettings[field.key]}
+                              onChange={e => patchRank({ [field.key]: Number(e.target.value) || 0 } as Partial<RankSettings>)}
+                              className="w-full px-2.5 py-1.5 bg-white border border-stone-200 rounded-lg text-center font-bold text-stone-800 focus:outline-none"
+                            />
+                            <span className="text-[10px] font-semibold text-stone-400">điểm</span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
 
-                      <div>
-                        <label className="text-[10px] text-stone-400 font-bold block mb-1">Bot Token</label>
-                        <input type="text" placeholder="123456789:ABCdefGHIjkl..." value={settings.telegramBotToken}
-                          onChange={e => setSettings(s => ({ ...s, telegramBotToken: e.target.value }))}
-                          className="w-full px-3 py-2 bg-stone-50 border border-stone-200 rounded-xl font-mono text-[10px] focus:outline-none" />
-                      </div>
-                      <div>
-                        <label className="text-[10px] text-stone-400 font-bold block mb-1">Chat ID (của bạn hoặc nhóm)</label>
-                        <input type="text" placeholder="-1001234567890" value={settings.telegramChatId}
-                          onChange={e => setSettings(s => ({ ...s, telegramChatId: e.target.value }))}
-                          className="w-full px-3 py-2 bg-stone-50 border border-stone-200 rounded-xl font-mono text-[10px] focus:outline-none" />
-                      </div>
+                    {!(settings.rankSettings.silverMinPoints < settings.rankSettings.goldMinPoints
+                      && settings.rankSettings.goldMinPoints < settings.rankSettings.diamondMinPoints) && (
+                      <p className="text-[10px] font-bold text-red-600 bg-red-50 border border-red-200 rounded-xl px-3 py-2">
+                        Mốc điểm phải tăng dần: Bạc &lt; Vàng &lt; Kim Cương — nếu không sẽ có hạng không bao giờ đạt được.
+                      </p>
+                    )}
 
-                      <button type="button" onClick={handleTestTelegram}
-                        className="flex items-center gap-2 px-4 py-2 bg-sky-50 hover:bg-sky-100 border border-sky-200 text-sky-700 rounded-xl font-bold text-[10px] transition">
-                        <Send className="w-3.5 h-3.5" /> Gửi tin nhắn thử nghiệm
-                      </button>
+                    {/* Benefits per tier */}
+                    <div className="space-y-3 pt-1">
+                      <p className="text-[10px] font-bold text-stone-400 uppercase tracking-wider">
+                        Quyền lợi từng hạng
+                      </p>
+                      {RANK_TIERS.map(tier => {
+                        const list = settings.rankSettings[benefitsKey(tier.key)] as string[];
+                        return (
+                          <div key={tier.key} className={`rounded-xl border p-3 space-y-2 ${tier.tone}`}>
+                            <p className="text-[11px] font-bold flex items-center gap-1.5">
+                              <span>{tier.icon}</span> Hạng {tier.label}
+                              <span className="opacity-60 font-semibold">({list.length} quyền lợi)</span>
+                            </p>
+
+                            {list.length > 0 && (
+                              <div className="space-y-1">
+                                {list.map((benefit, i) => (
+                                  <div key={i} className="flex items-start gap-2 bg-white/70 rounded-lg px-2.5 py-1.5">
+                                    <p className="flex-1 text-[11px] text-stone-700 leading-snug">{benefit}</p>
+                                    <button
+                                      type="button"
+                                      onClick={() => removeBenefit(tier.key, i)}
+                                      className="p-0.5 text-stone-300 hover:text-red-500 transition shrink-0"
+                                      title="Xóa quyền lợi"
+                                    >
+                                      <X className="w-3.5 h-3.5" />
+                                    </button>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+
+                            <div className="flex gap-1.5">
+                              <input
+                                type="text"
+                                placeholder="Thêm quyền lợi..."
+                                value={newBenefit[tier.key] || ""}
+                                onChange={e => setNewBenefit(b => ({ ...b, [tier.key]: e.target.value }))}
+                                onKeyDown={e => {
+                                  if (e.key === "Enter") { e.preventDefault(); addBenefit(tier.key); }
+                                }}
+                                className="flex-1 px-2.5 py-1.5 bg-white border border-stone-200 rounded-lg text-[11px] text-stone-800 focus:outline-none focus:border-[#9E5E6F]"
+                              />
+                              <button
+                                type="button"
+                                onClick={() => addBenefit(tier.key)}
+                                className="px-2.5 py-1.5 bg-white hover:bg-[#9E5E6F] hover:text-white border border-stone-200 rounded-lg transition shrink-0"
+                              >
+                                <Plus className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          </div>
+                        );
+                      })}
                     </div>
                   </div>
-                  */}
 
                   {/* Welcome Messages (Gen-Z vibes for homepage) */}
                   <div className="bg-white rounded-2xl p-5 border border-stone-200/60 shadow-sm">
@@ -816,6 +1141,69 @@ const EmployeeManagement = () => {
           </div>
         )}
       </div>
+      {/* ── Reset PIN Modal ── */}
+      {resetPinEmpId && (
+        <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl max-w-xs w-full p-6 shadow-2xl border border-stone-100 space-y-5">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <KeyRound className="w-5 h-5 text-amber-600" />
+                <h3 className="font-serif font-bold text-stone-900 text-sm">Đặt Lại PIN</h3>
+              </div>
+              <button onClick={() => { setResetPinEmpId(null); setResetPinName(""); setResetPinValue(""); }} className="p-1 hover:bg-stone-100 rounded-full transition">
+                <X className="w-4 h-4 text-stone-400" />
+              </button>
+            </div>
+
+            <div className="bg-amber-50 border border-amber-100 rounded-2xl p-3 text-center">
+              <p className="text-[11px] text-amber-700 font-semibold">
+                Đặt mã PIN mới cho <strong>{resetPinName}</strong>. Nhân viên sẽ phải đổi PIN riêng khi đăng nhập lần sau.
+              </p>
+            </div>
+
+            {/* PIN dots */}
+            <div className="flex justify-center gap-4">
+              {[0, 1, 2, 3].map(i => (
+                <div
+                  key={i}
+                  className={`w-4 h-4 rounded-full border-2 transition-all duration-150 ${resetPinValue.length > i
+                    ? "bg-amber-500 border-amber-500 scale-110"
+                    : "bg-white border-stone-300"
+                  }`}
+                />
+              ))}
+            </div>
+
+            {/* Numpad */}
+            <div className="grid grid-cols-3 gap-2">
+              {["1", "2", "3", "4", "5", "6", "7", "8", "9", "", "0", "⌫"].map((key, i) => (
+                <button
+                  key={i}
+                  onClick={() => {
+                    if (key === "⌫") setResetPinValue(v => v.slice(0, -1));
+                    else if (key !== "" && resetPinValue.length < 4) setResetPinValue(v => v + key);
+                  }}
+                  disabled={resetPinLoading || key === ""}
+                  className={`h-12 rounded-xl text-base font-bold transition active:scale-95 ${key === "" ? "invisible" : key === "⌫"
+                    ? "bg-stone-100 text-stone-500 hover:bg-stone-200"
+                    : "bg-stone-50 text-stone-800 hover:bg-amber-50 hover:text-amber-700 border border-stone-150"
+                  } disabled:opacity-50`}
+                >
+                  {key}
+                </button>
+              ))}
+            </div>
+
+            <button
+              onClick={handleResetPin}
+              disabled={resetPinValue.length !== 4 || resetPinLoading}
+              className="w-full py-3 bg-amber-500 hover:bg-amber-600 disabled:bg-stone-200 disabled:text-stone-400 text-white font-bold text-sm rounded-2xl transition"
+            >
+              {resetPinLoading ? "Đang xử lý..." : "Xác nhận đặt lại PIN"}
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
@@ -830,30 +1218,26 @@ const QrIconInline = () => (
 
 // ── Service List Panel with Tab Filter + Search ────────────────────────────────
 interface ServiceListPanelProps {
-  services: { _id: string; name: string; price: number; category: string; duration?: number; description?: string }[];
-  onEdit: (s: any) => void;
+  services: Service[];
+  categories: Category[];
+  onEdit: (s: Service) => void;
   onDelete: (id: string) => void;
+  onToggleActive: (s: Service) => void;
   formatPrice: (p: number) => string;
 }
 
-const SRV_CAT_TABS = [
-  { key: "all",       label: "Tất cả",    emoji: "🔖" },
-  { key: "nails",     label: "Nails",     emoji: "💅" },
-  { key: "eyelashes", label: "Nối Mi",    emoji: "✨" },
-  { key: "washing",   label: "Gội Đầu",  emoji: "🧴" },
-  { key: "makeup",    label: "Makeup",    emoji: "💄" },
-] as const;
-
-const CAT_COLORS: Record<string, string> = {
-  nails:     "bg-rose-50 text-rose-700 border-rose-100",
-  eyelashes: "bg-purple-50 text-purple-700 border-purple-100",
-  washing:   "bg-teal-50 text-teal-700 border-teal-100",
-  makeup:    "bg-pink-50 text-pink-700 border-pink-100",
-};
-
-const ServiceListPanel = ({ services, onEdit, onDelete, formatPrice }: ServiceListPanelProps) => {
+const ServiceListPanel = ({
+  services, categories, onEdit, onDelete, onToggleActive, formatPrice,
+}: ServiceListPanelProps) => {
   const [catFilter, setCatFilter] = React.useState<string>("all");
   const [search, setSearch] = React.useState("");
+
+  // Tabs follow whatever categories the admin has defined.
+  const tabs = [
+    { key: "all", label: "Tất cả", emoji: "🔖" },
+    ...categories.map(c => ({ key: c.key, label: c.name, emoji: c.icon })),
+  ];
+  const iconFor = (key: string) => categories.find(c => c.key === key)?.icon || "🏷️";
 
   const filtered = services.filter(s => {
     const matchCat = catFilter === "all" || s.category === catFilter;
@@ -902,7 +1286,7 @@ const ServiceListPanel = ({ services, onEdit, onDelete, formatPrice }: ServiceLi
 
         {/* Category filter tabs */}
         <div className="flex gap-1.5 overflow-x-auto pb-0.5 -mx-0.5 px-0.5">
-          {SRV_CAT_TABS.map(tab => {
+          {tabs.map(tab => {
             const count = countFor(tab.key);
             const active = catFilter === tab.key;
             return (
@@ -935,15 +1319,25 @@ const ServiceListPanel = ({ services, onEdit, onDelete, formatPrice }: ServiceLi
         ) : (
           <div className="divide-y divide-stone-50">
             {filtered.map(s => (
-              <div key={s._id} className="flex items-center gap-3 px-5 py-3 hover:bg-stone-50/70 transition group">
+              <div
+                key={s._id}
+                className={`flex items-center gap-3 px-5 py-3 hover:bg-stone-50/70 transition group ${s.isActive === false ? "opacity-55" : ""}`}
+              >
                 {/* Category badge */}
-                <span className={`shrink-0 text-[9px] font-bold px-2 py-1 rounded-lg border ${CAT_COLORS[s.category] || "bg-stone-50 text-stone-500 border-stone-100"}`}>
-                  {SRV_CAT_TABS.find(t => t.key === s.category)?.emoji || ""}
+                <span className="shrink-0 text-[13px] w-7 h-7 flex items-center justify-center rounded-lg border bg-stone-50 border-stone-100">
+                  {iconFor(s.category)}
                 </span>
 
                 {/* Info */}
                 <div className="flex-1 min-w-0">
-                  <p className="text-xs font-semibold text-stone-800 truncate">{s.name}</p>
+                  <p className="text-xs font-semibold text-stone-800 truncate flex items-center gap-1.5">
+                    {s.name}
+                    {s.isActive === false && (
+                      <span className="shrink-0 text-[8px] font-bold uppercase bg-stone-200 text-stone-600 px-1.5 py-0.5 rounded">
+                        Đang ẩn
+                      </span>
+                    )}
+                  </p>
                   {s.description && <p className="text-[10px] text-stone-400 truncate">{s.description}</p>}
                 </div>
 
@@ -954,6 +1348,13 @@ const ServiceListPanel = ({ services, onEdit, onDelete, formatPrice }: ServiceLi
 
                 {/* Actions — always visible, not hover-only (touch users need access) */}
                 <div className="flex gap-0.5 shrink-0">
+                  <button
+                    onClick={() => onToggleActive(s)}
+                    className="p-1.5 text-stone-400 hover:text-stone-700 hover:bg-stone-100 rounded-lg transition-colors duration-150"
+                    title={s.isActive === false ? "Hiện lại trên bảng giá" : "Tạm ẩn khỏi bảng giá"}
+                  >
+                    {s.isActive === false ? <EyeOff className="w-[13px] h-[13px]" /> : <Eye className="w-[13px] h-[13px]" />}
+                  </button>
                   <button
                     onClick={() => onEdit(s)}
                     className="p-1.5 text-primary hover:bg-accent rounded-lg transition-colors duration-150"
@@ -979,10 +1380,10 @@ const ServiceListPanel = ({ services, onEdit, onDelete, formatPrice }: ServiceLi
             ))}
           </div>
         )}
+
       </div>
     </div>
   );
 };
 
 export default EmployeeManagement;
-

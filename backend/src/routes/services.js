@@ -1,73 +1,107 @@
 import express from 'express';
 import Service from '../models/Service.js';
+import Category from '../models/Category.js';
+import { requireAdmin } from '../middleware/auth.js';
 
 const router = express.Router();
 
-// GET all services
+const parsePrice = (value) => {
+  const price = Number(value);
+  // 0 is deliberately allowed — used for complimentary / promotional items.
+  if (!Number.isFinite(price) || price < 0) return null;
+  return Math.round(price);
+};
+
+const assertCategoryExists = async (key) => {
+  const exists = await Category.exists({ key });
+  if (!exists) throw new Error(`Danh mục "${key}" không tồn tại`);
+};
+
+// ─── PUBLIC: list services ───────────────────────────────────────────────────
+// `?activeOnly=true` is what the customer-facing price list and the invoice
+// picker use, so a paused service disappears without being deleted.
 router.get('/', async (req, res) => {
   try {
-    const list = await Service.find().sort({ category: 1, name: 1 });
+    const filter = req.query.activeOnly === 'true' ? { isActive: { $ne: false } } : {};
+    const list = await Service.find(filter).sort({ category: 1, name: 1 });
     res.json(list);
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
 });
 
-// POST create service
-router.post('/', async (req, res) => {
-  const { name, price, category, duration } = req.body;
+// ─── ADMIN: create ───────────────────────────────────────────────────────────
+router.post('/', requireAdmin, async (req, res) => {
+  const { name, price, category, description, isActive } = req.body;
 
-  if (!name || !price || !category) {
-    return res.status(400).json({ message: 'Name, price, and category are required' });
+  if (!name || !String(name).trim()) {
+    return res.status(400).json({ message: 'Tên dịch vụ là bắt buộc' });
+  }
+  if (!category) {
+    return res.status(400).json({ message: 'Danh mục là bắt buộc' });
+  }
+  const parsedPrice = parsePrice(price);
+  if (parsedPrice === null) {
+    return res.status(400).json({ message: 'Đơn giá phải là số không âm' });
   }
 
   try {
+    await assertCategoryExists(category);
+
     const service = new Service({
-      name: name.trim(),
-      price: Number(price),
+      name: String(name).trim(),
+      price: parsedPrice,
       category,
-      duration: duration ? Number(duration) : 60
+      description: (description || '').trim(),
+      isActive: isActive !== undefined ? Boolean(isActive) : true,
     });
 
     await service.save();
     res.status(201).json(service);
   } catch (error) {
-    res.status(550).json({ message: error.message });
+    res.status(400).json({ message: error.message });
   }
 });
 
-// PUT update service
-router.put('/:id', async (req, res) => {
-  const { id } = req.params;
-  const { name, price, category, duration } = req.body;
+// ─── ADMIN: update ───────────────────────────────────────────────────────────
+router.put('/:id', requireAdmin, async (req, res) => {
+  const { name, price, category, description, isActive } = req.body;
 
   try {
-    const service = await Service.findById(id);
-    if (!service) {
-      return res.status(404).json({ message: 'Service not found' });
-    }
+    const service = await Service.findById(req.params.id);
+    if (!service) return res.status(404).json({ message: 'Không tìm thấy dịch vụ' });
 
-    if (name !== undefined) service.name = name.trim();
-    if (price !== undefined) service.price = Number(price);
-    if (category !== undefined) service.category = category;
-    if (duration !== undefined) service.duration = Number(duration);
+    if (name !== undefined) {
+      if (!String(name).trim()) return res.status(400).json({ message: 'Tên dịch vụ không được để trống' });
+      service.name = String(name).trim();
+    }
+    if (price !== undefined) {
+      const parsedPrice = parsePrice(price);
+      if (parsedPrice === null) return res.status(400).json({ message: 'Đơn giá phải là số không âm' });
+      service.price = parsedPrice;
+    }
+    if (category !== undefined) {
+      await assertCategoryExists(category);
+      service.category = category;
+    }
+    if (description !== undefined) service.description = String(description).trim();
+    if (isActive !== undefined) service.isActive = Boolean(isActive);
 
     await service.save();
     res.json(service);
   } catch (error) {
-    res.status(500).json({ message: error.message });
+    res.status(400).json({ message: error.message });
   }
 });
 
-// DELETE service
-router.delete('/:id', async (req, res) => {
-  const { id } = req.params;
+// ─── ADMIN: delete ───────────────────────────────────────────────────────────
+// Past invoices keep their own name/price snapshot, so removing a service here
+// never rewrites history.
+router.delete('/:id', requireAdmin, async (req, res) => {
   try {
-    const service = await Service.findByIdAndDelete(id);
-    if (!service) {
-      return res.status(404).json({ message: 'Service not found' });
-    }
-    res.json({ message: 'Service deleted successfully' });
+    const service = await Service.findByIdAndDelete(req.params.id);
+    if (!service) return res.status(404).json({ message: 'Không tìm thấy dịch vụ' });
+    res.json({ message: 'Đã xóa dịch vụ' });
   } catch (error) {
     res.status(500).json({ message: error.message });
   }

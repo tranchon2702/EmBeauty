@@ -13,7 +13,16 @@ const customerSchema = new mongoose.Schema({
   },
   points: {
     type: Number,
-    default: 0
+    default: 0 // Điểm khả dụng có thể tiêu/đổi quà
+  },
+  totalPointsEarned: {
+    type: Number,
+    default: 0 // Tổng điểm tích lũy trọn đời (xác định HẠNG THẺ — không tụt khi tiêu điểm)
+  },
+  // Stamped on every paid invoice — powers "khách lâu chưa quay lại" lists.
+  lastVisitAt: {
+    type: Date,
+    default: null
   }
 }, {
   timestamps: true

@@ -79,3 +79,103 @@
 ::-webkit-scrollbar-thumb:hover {
   background: var(--muted);
 }
+
+/* ═══════════════════════════════════════════════════════════════
+   SONNER TOAST — EM Beauty Brand Override
+   Mobile-first: toast xuất hiện từ bottom, slide up mượt
+   ═══════════════════════════════════════════════════════════════ */
+
+[data-sonner-toaster] {
+  --width: min(92vw, 380px) !important;
+  font-family: 'Outfit', system-ui, sans-serif !important;
+}
+
+[data-sonner-toast] {
+  background: #FDFBF7 !important;
+  border: 1px solid #EAE3DC !important;
+  border-radius: 18px !important;
+  box-shadow:
+    0 4px 6px -1px rgba(158, 94, 111, 0.08),
+    0 12px 32px -4px rgba(158, 94, 111, 0.14),
+    0 0 0 1px rgba(255,255,255,0.7) inset !important;
+  padding: 14px 16px !important;
+  gap: 10px !important;
+  min-height: 56px !important;
+  backdrop-filter: blur(8px) !important;
+  -webkit-backdrop-filter: blur(8px) !important;
+}
+
+/* Toast title */
+[data-sonner-toast] [data-title] {
+  font-size: 13.5px !important;
+  font-weight: 600 !important;
+  color: #2C2A29 !important;
+  letter-spacing: 0.01em !important;
+  line-height: 1.4 !important;
+}
+
+/* Toast description */
+[data-sonner-toast] [data-description] {
+  font-size: 12px !important;
+  color: #8E8A86 !important;
+  margin-top: 2px !important;
+}
+
+/* ── SUCCESS ── */
+[data-sonner-toast][data-type="success"] {
+  border-left: 3px solid #9E5E6F !important;
+  background: linear-gradient(135deg, #FDFBF7 0%, #FDF5F7 100%) !important;
+}
+[data-sonner-toast][data-type="success"] [data-icon] svg {
+  color: #9E5E6F !important;
+  width: 18px !important;
+  height: 18px !important;
+}
+
+/* ── ERROR ── */
+[data-sonner-toast][data-type="error"] {
+  border-left: 3px solid #C0392B !important;
+  background: linear-gradient(135deg, #FDFBF7 0%, #FEF5F5 100%) !important;
+}
+[data-sonner-toast][data-type="error"] [data-icon] svg {
+  color: #C0392B !important;
+  width: 18px !important;
+  height: 18px !important;
+}
+
+/* ── WARNING ── */
+[data-sonner-toast][data-type="warning"] {
+  border-left: 3px solid #D97706 !important;
+  background: linear-gradient(135deg, #FDFBF7 0%, #FFFBF0 100%) !important;
+}
+[data-sonner-toast][data-type="warning"] [data-icon] svg {
+  color: #D97706 !important;
+  width: 18px !important;
+  height: 18px !important;
+}
+
+/* ── INFO ── */
+[data-sonner-toast][data-type="info"] {
+  border-left: 3px solid #6B7280 !important;
+}
+
+/* Close button */
+[data-sonner-toast] [data-close-button] {
+  background: #F4EFEB !important;
+  border: 1px solid #EAE3DC !important;
+  border-radius: 50% !important;
+  width: 22px !important;
+  height: 22px !important;
+  top: -8px !important;
+  right: -8px !important;
+  left: auto !important;
+  color: #8E8A86 !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+}
+[data-sonner-toast] [data-close-button]:hover {
+  background: #EAE3DC !important;
+  color: #2C2A29 !important;
+}
+

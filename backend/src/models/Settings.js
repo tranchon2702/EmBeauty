@@ -1,22 +1,11 @@
 import mongoose from 'mongoose';
 
 const settingsSchema = new mongoose.Schema({
+  // Points awarded = floor(totalAmount * pointRewardRate / 100000).
+  // At the default of 10 that is 1 point per 10.000đ spent.
   pointRewardRate: {
     type: Number,
-    default: 10 // e.g. 10% of total invoice value converted to loyalty points
-  },
-  // Telegram Bot integration
-  telegramBotToken: {
-    type: String,
-    default: '' // e.g. "123456789:ABCdef..."
-  },
-  telegramChatId: {
-    type: String,
-    default: '' // Admin's Telegram chat ID or group ID
-  },
-  telegramNotificationsEnabled: {
-    type: Boolean,
-    default: false
+    default: 10
   },
   // Salon info
   salonName: {
@@ -59,6 +48,51 @@ const settingsSchema = new mongoose.Schema({
       'Nail xong rồi selfie thôi, chính sách!',
       'Tiệm nhỏ nhưng tâm rất lớn — em hứa 🤍'
     ]
+  },
+  // Loyalty rank tier thresholds & custom benefits
+  rankSettings: {
+    silverMinPoints: { type: Number, default: 50 },
+    goldMinPoints: { type: Number, default: 100 },
+    diamondMinPoints: { type: Number, default: 200 },
+    bronzeBenefits: {
+      type: [String],
+      default: [
+        'Tích điểm tự động mỗi lần làm dịch vụ',
+        'Quà chào mừng dành riêng cho thành viên mới',
+        'Tra cứu điểm trực tuyến mọi lúc qua Zalo/Web'
+      ]
+    },
+    silverBenefits: {
+      type: [String],
+      default: [
+        'Tích điểm mỗi lần sử dụng dịch vụ',
+        'Giảm 5% trực tiếp trên hóa đơn dịch vụ Nails',
+        'Quà ưu đãi sinh nhật đặc biệt trong tháng'
+      ]
+    },
+    goldBenefits: {
+      type: [String],
+      default: [
+        'Tích điểm ×1.5 tốc độ mỗi hóa đơn',
+        'Giảm 10% tất cả dịch vụ (Nails, Mi, Gội đầu, Makeup)',
+        'Quà sinh nhật cao cấp + quà tặng kỷ niệm',
+        'Ưu tiên giữ lịch hẹn đẹp qua Zalo'
+      ]
+    },
+    diamondBenefits: {
+      type: [String],
+      default: [
+        'Tích điểm ×2 nhân đôi tốc độ mỗi hóa đơn',
+        'Giảm 15% trọn đời tất cả dịch vụ tại tiệm',
+        'Combo quà sinh nhật VIP + 1 dịch vụ chăm sóc miễn phí',
+        'Ưu tiên tuyệt đối đặt lịch & tư vấn mẫu móng riêng',
+        'Thẻ mời tham gia sự kiện Tri Ân đặc quyền'
+      ]
+    }
+  },
+  // One-off data fixes that have already run, so boot stays idempotent.
+  migrations: {
+    lifetimePointsBackfill: { type: Boolean, default: false }
   }
 }, {
   timestamps: true

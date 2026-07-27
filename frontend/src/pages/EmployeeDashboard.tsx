@@ -1,9 +1,9 @@
 import React, { useState, useEffect } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { LogOut, PlusCircle, BarChart3, Settings as SettingsIcon, ClipboardList, CheckCircle, XCircle, AlertCircle, RefreshCw, CalendarCheck, CalendarDays, Plus, LayoutList, CalendarRange } from "lucide-react";
-import BookingCalendar from "../components/BookingCalendar";
+import { LogOut, PlusCircle, BarChart3, Settings as SettingsIcon, ClipboardList, CheckCircle, XCircle, AlertCircle, RefreshCw, KeyRound } from "lucide-react";
 import { toast } from "sonner";
-import { API_BASE } from "../config";
+import { API_BASE, authFetch, clearSession, getSession } from "../config";
+import { vnToday } from "../lib/date";
 
 interface SessionData {
   _id: string;
@@ -15,35 +15,17 @@ interface StatsData {
   totalRevenue: number;
   cashRevenue: number;
   bankRevenue: number;
-  invoiceCount: number;
+  paidCount: number;
+  /** "all" for admins, "self" when a staff member only sees their own takings. */
+  scope: "all" | "self";
 }
-
-interface BookingData {
-  _id: string;
-  name: string;
-  phone: string;
-  services: string[];
-  date: string;
-  time: string;
-  status: "pending" | "confirmed" | "completed" | "cancelled";
-}
-
-interface ServiceItem {
-  _id: string;
-  name: string;
-}
-
-const TIME_SLOTS = [
-  "08:00", "09:00", "10:00", "11:00", "12:00", "13:00", 
-  "14:00", "15:00", "16:00", "17:00", "18:00", "19:00", "20:00"
-];
 
 interface InvoiceData {
   _id: string;
   invoiceNumber: string;
   customerName: string;
   customerPhone: string;
-  services: Array<{ name: string; price: number }>;
+  services: Array<{ name: string; price: number; quantity?: number }>;
   totalAmount: number;
   paymentMethod: "cash" | "bank";
   status: "draft" | "paid" | "cancelled";
@@ -56,38 +38,89 @@ interface InvoiceData {
 const EmployeeDashboard = () => {
   const navigate = useNavigate();
   const [session, setSession] = useState<SessionData | null>(null);
-  const [stats, setStats] = useState<StatsData>({ totalRevenue: 0, cashRevenue: 0, bankRevenue: 0, invoiceCount: 0 });
+  const [stats, setStats] = useState<StatsData>({
+    totalRevenue: 0, cashRevenue: 0, bankRevenue: 0, paidCount: 0, scope: "self",
+  });
   const [invoices, setInvoices] = useState<InvoiceData[]>([]);
   const [loading, setLoading] = useState(true);
+  const [selectedInvoice, setSelectedInvoice] = useState<InvoiceData | null>(null);
+  const [updatingStatus, setUpdatingStatus] = useState(false);
 
-  // Authenticate session
+  // PIN change modal
+  const [showPinModal, setShowPinModal] = useState(false);
+  const [pinStep, setPinStep] = useState<"current" | "new" | "confirm">("current");
+  const [currentPin, setCurrentPin] = useState("");
+  const [newPin, setNewPin] = useState("");
+  const [confirmPin, setConfirmPin] = useState("");
+  const [pinLoading, setPinLoading] = useState(false);
+
+  const handleMarkPaidModal = async (inv: InvoiceData) => {
+    setUpdatingStatus(true);
+    setSelectedInvoice(null); // Close modal immediately to prevent double-click
+    try {
+      const res = await authFetch(`${API_BASE}/invoices/${inv._id}/pay`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ paymentMethod: inv.paymentMethod || "cash" }),
+      });
+      const d = await res.json();
+      if (!res.ok) throw new Error(d.message);
+      toast.success(`✅ Đã thanh toán thành công ${inv.invoiceNumber}`);
+      // ── LOYALTY POINTS DISABLED (tạm tắt cảnh báo tích điểm) ──────────────
+      // if (d.pointsWarning) toast.warning(d.pointsWarning, { duration: 10000 });
+      fetchData();
+    } catch (err: any) {
+      toast.error(err.message || "Lỗi thanh toán");
+    } finally {
+      setUpdatingStatus(false);
+    }
+  };
+
+  const handleCancelInvoiceModal = async (inv: InvoiceData) => {
+    if (!confirm(`Bạn chắc chắn muốn hủy phiếu nháp ${inv.invoiceNumber}?`)) return;
+    setUpdatingStatus(true);
+    try {
+      const res = await authFetch(`${API_BASE}/invoices/${inv._id}/cancel`, {
+        method: "PATCH",
+      });
+      if (!res.ok) throw new Error("Lỗi hủy phiếu nháp");
+      toast.success("Đã hủy phiếu nháp");
+      setSelectedInvoice(null);
+      fetchData();
+    } catch (err: any) {
+      toast.error(err.message || "Lỗi hủy phiếu");
+    } finally {
+      setUpdatingStatus(false);
+    }
+  };
+
   useEffect(() => {
-    const rawSession = localStorage.getItem("embeauty_session");
-    if (!rawSession) {
+    const session = getSession();
+    if (!session) {
       toast.error("Vui lòng đăng nhập trước");
       navigate("/staff");
       return;
     }
-    setSession(JSON.parse(rawSession));
+    setSession(session);
   }, [navigate]);
 
   const fetchData = async () => {
-    if (!localStorage.getItem("embeauty_session")) return;
+    if (!getSession()) return;
     setLoading(true);
     try {
-      // 1. Fetch stats
-      const statsRes = await fetch(`${API_BASE}/invoices/stats/today`);
-      if (statsRes.ok) {
-        const statsData = await statsRes.json();
-        setStats(statsData);
-      }
+      // Both calls key off the same Vietnam-local day, and the server reports
+      // revenue by paidAt — so this figure always matches the Thống kê page.
+      const today = vnToday();
 
-      // 2. Fetch today's invoices
-      const todayStr = new Date().toISOString().split("T")[0];
-      const invRes = await fetch(`${API_BASE}/invoices?date=${todayStr}`);
+      const [statsRes, invRes] = await Promise.all([
+        authFetch(`${API_BASE}/invoices/stats/summary?dateFrom=${today}&dateTo=${today}`),
+        authFetch(`${API_BASE}/invoices?date=${today}`),
+      ]);
+
+      if (statsRes.ok) setStats(await statsRes.json());
       if (invRes.ok) {
-        const invData = await invRes.json();
-        setInvoices(invData);
+        const data = await invRes.json();
+        setInvoices(data.items || []);
       }
     } catch (err) {
       toast.error("Lỗi đồng bộ dữ liệu");
@@ -102,18 +135,86 @@ const EmployeeDashboard = () => {
   }, []);
 
   const handleLogout = () => {
-    localStorage.removeItem("embeauty_session");
+    clearSession();
     toast.success("Đã đăng xuất");
-    navigate("/employee");
+    navigate("/staff");
+  };
+
+  // ── PIN Change handlers ──
+  const resetPinModal = () => {
+    setShowPinModal(false);
+    setPinStep("current");
+    setCurrentPin("");
+    setNewPin("");
+    setConfirmPin("");
+  };
+
+  const handlePinDigit = (digit: string) => {
+    if (pinStep === "current") {
+      if (currentPin.length < 4) {
+        const val = currentPin + digit;
+        setCurrentPin(val);
+        if (val.length === 4) setTimeout(() => setPinStep("new"), 200);
+      }
+    } else if (pinStep === "new") {
+      if (newPin.length < 4) {
+        const val = newPin + digit;
+        setNewPin(val);
+        if (val.length === 4) setTimeout(() => setPinStep("confirm"), 200);
+      }
+    } else {
+      if (confirmPin.length < 4) {
+        const val = confirmPin + digit;
+        setConfirmPin(val);
+        if (val.length === 4) setTimeout(() => submitPinChange(val), 200);
+      }
+    }
+  };
+
+  const handlePinDelete = () => {
+    if (pinStep === "confirm") {
+      if (confirmPin.length > 0) setConfirmPin(p => p.slice(0, -1));
+      else setPinStep("new");
+    } else if (pinStep === "new") {
+      if (newPin.length > 0) setNewPin(p => p.slice(0, -1));
+      else setPinStep("current");
+    } else {
+      setCurrentPin(p => p.slice(0, -1));
+    }
+  };
+
+  const submitPinChange = async (confirm: string) => {
+    if (newPin !== confirm) {
+      toast.error("Mã PIN xác nhận không khớp!");
+      setConfirmPin("");
+      setNewPin("");
+      setPinStep("new");
+      return;
+    }
+    if (!session) return;
+    setPinLoading(true);
+    try {
+      const res = await authFetch(`${API_BASE}/employees/${session._id}/change-pin`, {
+        method: "PATCH",
+        body: JSON.stringify({ currentPin, newPin }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.message);
+      toast.success(data.message || "Đã đổi mã PIN thành công!");
+      resetPinModal();
+    } catch (err: any) {
+      toast.error(err.message || "Lỗi đổi PIN");
+      setCurrentPin("");
+      setNewPin("");
+      setConfirmPin("");
+      setPinStep("current");
+    } finally {
+      setPinLoading(false);
+    }
   };
 
   const formatPrice = (price: number) => {
     return price.toLocaleString("vi-VN") + "đ";
-  };
-
-  const formatDate = (dateString: string) => {
-    const d = new Date(dateString);
-    return `${d.getDate().toString().padStart(2, '0')}/${(d.getMonth() + 1).toString().padStart(2, '0')}/${d.getFullYear()}`;
   };
 
   return (
@@ -142,7 +243,14 @@ const EmployeeDashboard = () => {
         <div className="md:col-span-1 space-y-6">
           {/* Quick Stats Panel */}
           <div className="bg-white rounded-2xl p-5 border border-stone-200/60 shadow-sm space-y-4">
-            <h2 className="text-xs font-bold text-stone-400 uppercase tracking-wider">Doanh thu hôm nay</h2>
+            <h2 className="text-xs font-bold text-stone-400 uppercase tracking-wider">
+              Doanh thu hôm nay
+              {stats.scope === "self" && (
+                <span className="block text-[9px] font-semibold text-stone-300 normal-case tracking-normal mt-0.5">
+                  Chỉ tính các hóa đơn của bạn
+                </span>
+              )}
+            </h2>
             <div className="space-y-3">
               <div>
                 <span className="text-[10px] text-stone-400 block font-medium">Tổng hóa đơn:</span>
@@ -160,7 +268,7 @@ const EmployeeDashboard = () => {
               </div>
               <div className="pt-2 border-t border-stone-100 text-[10px] text-stone-500">
                 <span className="font-medium">Số đơn hàng: </span>
-                <span className="font-bold text-stone-750">{stats.invoiceCount} đơn</span>
+                <span className="font-bold text-stone-750">{stats.paidCount} đơn</span>
               </div>
             </div>
           </div>
@@ -174,14 +282,6 @@ const EmployeeDashboard = () => {
               <PlusCircle className="w-5 h-5 shrink-0" />
               <span>Tạo Hóa Đơn Mới</span>
             </Link>
-
-            <button
-              onClick={() => setShowWalkinModal(true)}
-              className="flex items-center gap-3 p-3 hover:bg-[#F9ECEF] hover:text-[#9E5E6F] text-stone-700 w-full text-left rounded-xl transition font-medium text-xs"
-            >
-              <CalendarCheck className="w-5 h-5 shrink-0" />
-              <span>Khóa Lịch Khách Ngoài</span>
-            </button>
 
             <Link
               to="/employee/stats"
@@ -200,6 +300,14 @@ const EmployeeDashboard = () => {
                 <span>Nhân Sự & Thiết Lập</span>
               </Link>
             )}
+
+            <button
+              onClick={() => setShowPinModal(true)}
+              className="flex items-center gap-3 p-3 hover:bg-amber-50 hover:text-amber-700 text-stone-700 rounded-xl transition font-medium text-xs w-full text-left"
+            >
+              <KeyRound className="w-5 h-5 shrink-0" />
+              <span>Đổi Mã PIN</span>
+            </button>
           </div>
         </div>
 
@@ -212,7 +320,7 @@ const EmployeeDashboard = () => {
                 <h2 className="font-serif font-bold text-stone-900 text-base">Hóa Đơn Hôm Nay</h2>
                 <span className="text-[10px] font-bold bg-primary/10 text-primary px-2 py-0.5 rounded-full">{invoices.length}</span>
               </div>
-              <button onClick={fetchData} className="p-1.5 hover:bg-stone-100 rounded-lg transition-colors duration-150">
+              <button onClick={fetchData} className="p-1.5 hover:bg-stone-100 rounded-lg transition-colors duration-150" title="Làm mới">
                 <RefreshCw className="w-4 h-4 text-stone-400" />
               </button>
             </div>
@@ -229,9 +337,13 @@ const EmployeeDashboard = () => {
                 <p className="text-xs mt-1">Bấm "Tạo Hóa Đơn Mới" ở thanh bên trái để ghi nhận doanh thu.</p>
               </div>
             ) : (
-              <div className="space-y-4">
+              <div className="space-y-3">
                 {invoices.map((inv) => (
-                  <div key={inv._id} className="border border-stone-200/70 hover:border-stone-300 rounded-2xl p-4 transition-colors duration-150 bg-background/40 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+                  <div
+                    key={inv._id}
+                    onClick={() => setSelectedInvoice(inv)}
+                    className="border border-stone-200/70 hover:border-[#9E5E6F]/40 hover:shadow-md cursor-pointer rounded-2xl p-4 transition-all duration-150 bg-white flex flex-col md:flex-row md:items-center md:justify-between gap-4"
+                  >
                     <div className="space-y-1.5">
                       <div className="flex items-center gap-2">
                         <span className="font-mono text-xs font-bold text-stone-700">{inv.invoiceNumber}</span>
@@ -239,7 +351,7 @@ const EmployeeDashboard = () => {
                           <span className="text-[9px] font-bold bg-emerald-50 text-emerald-600 border border-emerald-100 px-2 py-0.5 rounded-full">Đã Thanh Toán</span>
                         )}
                         {inv.status === "draft" && (
-                          <span className="text-[9px] font-bold bg-amber-50 text-amber-600 border border-amber-100 px-2 py-0.5 rounded-full">Bản Nháp</span>
+                          <span className="text-[9px] font-bold bg-amber-50 text-amber-600 border border-amber-100 px-2 py-0.5 rounded-full animate-pulse">Bản Nháp (Bấm để xem & thanh toán)</span>
                         )}
                         {inv.status === "cancelled" && (
                           <span className="text-[9px] font-bold bg-stone-100 text-stone-500 border border-stone-200 px-2 py-0.5 rounded-full">Đã Hủy</span>
@@ -254,7 +366,7 @@ const EmployeeDashboard = () => {
                         <div className="flex flex-wrap gap-1 pt-0.5">
                           {inv.services.map((s, i) => (
                             <span key={i} className="text-[10px] bg-stone-100 border border-stone-200 rounded-full px-2 py-0.5 font-medium text-stone-600">
-                              {s.name} ({formatPrice(s.price)})
+                              {s.name} {s.quantity ? `x${s.quantity}` : ""} ({formatPrice(s.price * (s.quantity || 1))})
                             </span>
                           ))}
                         </div>
@@ -262,7 +374,7 @@ const EmployeeDashboard = () => {
                     </div>
 
                     <div className="flex flex-col items-end gap-1.5 self-stretch md:self-auto justify-between md:justify-center border-t md:border-t-0 pt-3 md:pt-0 border-stone-100">
-                      <span className="text-sm font-bold text-primary font-serif">{formatPrice(inv.totalAmount)}</span>
+                      <span className="text-sm font-bold text-[#9E5E6F] font-serif">{formatPrice(inv.totalAmount)}</span>
                       <span className="text-[10px] text-stone-400">
                         Thanh toán: <span className="font-bold">{inv.paymentMethod === "cash" ? "Tiền mặt" : "Chuyển khoản"}</span>
                       </span>
@@ -274,6 +386,197 @@ const EmployeeDashboard = () => {
           </div>
         </div>
       </div>
+
+      {/* ── Detail & Status Update Modal ── */}
+      {selectedInvoice && (
+        <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl max-w-lg w-full p-6 shadow-2xl space-y-4 border border-stone-100 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between pb-3 border-b border-stone-100">
+              <div>
+                <span className="text-[10px] uppercase font-bold tracking-wider text-stone-400">Chi Tiết Hóa Đơn</span>
+                <h3 className="font-mono font-bold text-lg text-stone-900">{selectedInvoice.invoiceNumber}</h3>
+              </div>
+              <div className="flex items-center gap-2">
+                {selectedInvoice.status === "paid" && (
+                  <span className="text-xs font-bold bg-emerald-100 text-emerald-700 px-3 py-1 rounded-full">Đã Thanh Toán</span>
+                )}
+                {selectedInvoice.status === "draft" && (
+                  <span className="text-xs font-bold bg-amber-100 text-amber-700 px-3 py-1 rounded-full">Bản Nháp</span>
+                )}
+                {selectedInvoice.status === "cancelled" && (
+                  <span className="text-xs font-bold bg-stone-100 text-stone-600 px-3 py-1 rounded-full">Đã Hủy</span>
+                )}
+                <button
+                  onClick={() => setSelectedInvoice(null)}
+                  className="p-1 hover:bg-stone-100 text-stone-400 rounded-full transition"
+                >
+                  <XCircle className="w-5 h-5" />
+                </button>
+              </div>
+            </div>
+
+            {/* Info rows */}
+            <div className="bg-stone-50 rounded-2xl p-4 text-xs space-y-2">
+              <div className="flex justify-between">
+                <span className="text-stone-500">Khách hàng:</span>
+                <span className="font-bold text-stone-800">{selectedInvoice.customerName || "Khách vãng lai"} {selectedInvoice.customerPhone && `(${selectedInvoice.customerPhone})`}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-stone-500">Nhân viên thực hiện:</span>
+                <span className="font-bold text-stone-800">{selectedInvoice.employeeId?.name || "Hệ thống"}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-stone-500">Hình thức thanh toán:</span>
+                <span className="font-bold text-[#9E5E6F]">{selectedInvoice.paymentMethod === "cash" ? "💵 Tiền mặt" : "🏦 Chuyển khoản QR"}</span>
+              </div>
+            </div>
+
+            {/* Services list */}
+            <div>
+              <p className="text-[10px] font-bold text-stone-400 uppercase mb-2">Danh sách dịch vụ</p>
+              <div className="divide-y divide-stone-100 text-xs border border-stone-200 rounded-2xl overflow-hidden">
+                {selectedInvoice.services.map((s, idx) => (
+                  <div key={idx} className="p-3 flex justify-between items-center bg-white">
+                    <div>
+                      <p className="font-bold text-stone-800">{s.name}</p>
+                      <p className="text-[10px] text-stone-400 font-serif">{formatPrice(s.price)} x {s.quantity || 1}</p>
+                    </div>
+                    <span className="font-bold text-stone-900">{formatPrice(s.price * (s.quantity || 1))}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Total breakdown */}
+            <div className="pt-2 space-y-1.5 text-xs">
+              <div className="flex justify-between font-bold text-sm pt-2 border-t border-stone-200">
+                <span>Tổng tiền:</span>
+                <span className="text-base text-[#9E5E6F] font-serif font-extrabold">{formatPrice(selectedInvoice.totalAmount)}</span>
+              </div>
+            </div>
+
+            {/* Action buttons */}
+            <div className="pt-3 border-t border-stone-100 flex flex-col sm:flex-row gap-2">
+              {selectedInvoice.status === "draft" && (
+                <>
+                  <button
+                    disabled={updatingStatus}
+                    onClick={() => handleMarkPaidModal(selectedInvoice)}
+                    className="flex-1 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold text-xs transition flex items-center justify-center gap-1.5 shadow-md shadow-emerald-600/20"
+                  >
+                    <CheckCircle className="w-4 h-4" /> Xác Nhận Thanh Toán
+                  </button>
+
+                  <button
+                    onClick={() => {
+                      const id = selectedInvoice._id;
+                      setSelectedInvoice(null);
+                      navigate(`/employee/invoice/create?id=${id}`);
+                    }}
+                    className="py-2.5 px-4 bg-[#9E5E6F] hover:bg-[#8D5060] text-white rounded-xl font-bold text-xs transition flex items-center justify-center gap-1.5"
+                  >
+                    <PlusCircle className="w-4 h-4" /> Sửa Phiếu
+                  </button>
+
+                  <button
+                    disabled={updatingStatus}
+                    onClick={() => handleCancelInvoiceModal(selectedInvoice)}
+                    className="py-2.5 px-3 bg-stone-100 hover:bg-red-50 text-red-600 rounded-xl font-bold text-xs transition"
+                  >
+                    Hủy
+                  </button>
+                </>
+              )}
+
+              {selectedInvoice.status !== "draft" && (
+                <button
+                  onClick={() => setSelectedInvoice(null)}
+                  className="w-full py-2.5 bg-stone-100 text-stone-700 rounded-xl font-bold text-xs hover:bg-stone-200 transition"
+                >
+                  Đóng Window
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── PIN Change Modal ── */}
+      {showPinModal && (
+        <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl max-w-xs w-full p-6 shadow-2xl border border-stone-100 space-y-5">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <KeyRound className="w-5 h-5 text-amber-600" />
+                <h3 className="font-serif font-bold text-stone-900">Đổi Mã PIN</h3>
+              </div>
+              <button onClick={resetPinModal} className="p-1 hover:bg-stone-100 rounded-full transition">
+                <XCircle className="w-5 h-5 text-stone-400" />
+              </button>
+            </div>
+
+            {/* Step indicator */}
+            <div className="flex items-center gap-2">
+              {[
+                { step: "current" as const, label: "PIN cũ" },
+                { step: "new" as const, label: "PIN mới" },
+                { step: "confirm" as const, label: "Xác nhận" },
+              ].map((s, i) => (
+                <div key={s.step} className="flex items-center gap-2 flex-1">
+                  <div className={`h-1 flex-1 rounded-full transition-all ${
+                    pinStep === s.step ? "bg-amber-500" :
+                    (pinStep === "new" && s.step === "current") || (pinStep === "confirm" && s.step !== "confirm") ? "bg-emerald-500" :
+                    "bg-stone-200"
+                  }`} />
+                </div>
+              ))}
+            </div>
+            <p className="text-xs text-stone-500 text-center font-semibold">
+              {pinStep === "current" ? "Nhập mã PIN hiện tại" : pinStep === "new" ? "Nhập mã PIN mới" : "Xác nhận mã PIN mới"}
+            </p>
+
+            {/* PIN dots */}
+            <div className="flex justify-center gap-4">
+              {[0, 1, 2, 3].map(i => {
+                const val = pinStep === "current" ? currentPin : pinStep === "new" ? newPin : confirmPin;
+                return (
+                  <div
+                    key={i}
+                    className={`w-4 h-4 rounded-full border-2 transition-all duration-150 ${val.length > i
+                      ? "bg-amber-500 border-amber-500 scale-110"
+                      : "bg-white border-stone-300"
+                    }`}
+                  />
+                );
+              })}
+            </div>
+
+            {/* Numpad */}
+            <div className="grid grid-cols-3 gap-2">
+              {["1", "2", "3", "4", "5", "6", "7", "8", "9", "", "0", "⌫"].map((key, i) => (
+                <button
+                  key={i}
+                  onClick={() => {
+                    if (key === "⌫") handlePinDelete();
+                    else if (key !== "") handlePinDigit(key);
+                  }}
+                  disabled={pinLoading || key === ""}
+                  className={`h-12 rounded-xl text-base font-bold transition active:scale-95 ${key === "" ? "invisible" : key === "⌫"
+                    ? "bg-stone-100 text-stone-500 hover:bg-stone-200"
+                    : "bg-stone-50 text-stone-800 hover:bg-amber-50 hover:text-amber-700 border border-stone-150"
+                  } disabled:opacity-50`}
+                >
+                  {key}
+                </button>
+              ))}
+            </div>
+
+            {pinLoading && (
+              <p className="text-[10px] text-stone-400 text-center">Đang xử lý...</p>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 };

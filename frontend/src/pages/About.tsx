@@ -7,9 +7,15 @@ interface ServiceItem {
   _id: string;
   name: string;
   price: number;
-  category: "nails" | "eyelashes" | "washing" | "makeup";
-  duration?: number;
+  category: string;
   description?: string;
+}
+
+interface CategoryItem {
+  _id: string;
+  key: string;
+  name: string;
+  icon: string;
 }
 
 interface SalonSettings {
@@ -20,21 +26,13 @@ interface SalonSettings {
   googleMapsUrl: string;
 }
 
-type Category = "nails" | "eyelashes" | "washing" | "makeup";
-
-const CATEGORIES: { key: Category; label: string; emoji: string; title: string; subtitle: string }[] = [
-  { key: "nails",      label: "Nails",       emoji: "💅", title: "Chăm Sóc Móng Cao Cấp",   subtitle: "Gel, Acrylic, Móng nghệ thuật" },
-  { key: "eyelashes",  label: "Nối Mi",      emoji: "✨", title: "Nối Mi Thiết Kế",          subtitle: "Classic, Volume, Uốn mi Collagen" },
-  { key: "washing",    label: "Gội Đầu",     emoji: "🧴", title: "Gội Đầu & Massage",        subtitle: "Thảo dược, Dưỡng sinh, Keratin" },
-  { key: "makeup",     label: "Makeup",      emoji: "💄", title: "Trang Điểm Chuyên Nghiệp", subtitle: "Cô dâu, Sự kiện, Phun thẩm mỹ" },
-];
-
 const About = () => {
   const [services, setServices] = useState<ServiceItem[]>([]);
+  const [categories, setCategories] = useState<CategoryItem[]>([]);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<Category>("nails");
+  const [activeTab, setActiveTab] = useState<string>("");
   const tabBarRef = useRef<HTMLDivElement>(null);
-  
+
   const [settings, setSettings] = useState<SalonSettings>({
     salonName: "EM Beauty",
     salonPhone: "035 836 7919",
@@ -44,18 +42,27 @@ const About = () => {
   });
 
   useEffect(() => {
-    // 1. Fetch services
-    const fetchServices = async () => {
+    // 1. Fetch categories + services. `activeOnly` keeps paused services off
+    //    the public price list without deleting them.
+    const fetchCatalogue = async () => {
       try {
-        const res = await fetch(`${API_BASE}/services`);
-        if (res.ok) setServices(await res.json());
+        const [catRes, srvRes] = await Promise.all([
+          fetch(`${API_BASE}/categories`),
+          fetch(`${API_BASE}/services?activeOnly=true`),
+        ]);
+        if (catRes.ok) {
+          const cats: CategoryItem[] = await catRes.json();
+          setCategories(cats);
+          if (cats.length > 0) setActiveTab(cats[0].key);
+        }
+        if (srvRes.ok) setServices(await srvRes.json());
       } catch (err) {
-        console.error("Lỗi lấy dịch vụ:", err);
+        console.error("Lỗi lấy bảng giá:", err);
       } finally {
         setLoading(false);
       }
     };
-    
+
     // 2. Fetch settings
     const fetchSettings = async () => {
       try {
@@ -75,15 +82,15 @@ const About = () => {
       }
     };
 
-    fetchServices();
+    fetchCatalogue();
     fetchSettings();
   }, []);
 
   // Intersection observer to auto-update active tab while scrolling
   useEffect(() => {
-    if (loading) return;
+    if (loading || categories.length === 0) return;
     const observers: IntersectionObserver[] = [];
-    CATEGORIES.forEach(({ key }) => {
+    categories.forEach(({ key }) => {
       const el = document.getElementById(`section-${key}`);
       if (!el) return;
       const obs = new IntersectionObserver(
@@ -94,16 +101,20 @@ const About = () => {
       observers.push(obs);
     });
     return () => observers.forEach(o => o.disconnect());
-  }, [loading]);
+  }, [loading, categories]);
 
-  const scrollToSection = (key: Category) => {
+  const scrollToSection = (key: string) => {
     setActiveTab(key);
     const el = document.getElementById(`section-${key}`);
     if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
   };
 
-  const getServices = (cat: Category) => services.filter(s => s.category === cat);
+  const getServices = (cat: string) => services.filter(s => s.category === cat);
   const formatPrice = (p: number) => p.toLocaleString("vi-VN") + "đ";
+
+  // An empty category would render as a dead tab, so only list the ones that
+  // actually have something to sell.
+  const visibleCategories = categories.filter(cat => getServices(cat.key).length > 0);
 
   return (
     <div className="min-h-screen bg-[#FDFBF7] pb-24">
@@ -142,7 +153,7 @@ const About = () => {
       {/* ── Sticky Tab Bar ── */}
       <div ref={tabBarRef} className="sticky top-0 z-20 bg-[#FDFBF7]/95 backdrop-blur-md border-b border-stone-200/60 shadow-sm">
         <div className="flex overflow-x-auto px-3 py-2.5 gap-2" style={{ scrollbarWidth: "none", msOverflowStyle: "none" }}>
-          {CATEGORIES.map(cat => (
+          {visibleCategories.map(cat => (
             <button
               key={cat.key}
               onClick={() => scrollToSection(cat.key)}
@@ -151,8 +162,8 @@ const About = () => {
                 : "bg-white border-stone-200 text-stone-600 hover:border-stone-300"
                 }`}
             >
-              <span>{cat.emoji}</span>
-              <span>{cat.label}</span>
+              <span>{cat.icon}</span>
+              <span>{cat.name}</span>
             </button>
           ))}
         </div>
@@ -165,8 +176,13 @@ const About = () => {
             <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-[#9E5E6F] mx-auto" />
             <p className="text-xs text-stone-400 mt-3">Đang tải bảng giá...</p>
           </div>
+        ) : visibleCategories.length === 0 ? (
+          <div className="py-20 text-center">
+            <p className="text-sm font-semibold text-stone-500">Bảng giá đang được cập nhật</p>
+            <p className="text-xs text-stone-400 mt-1">Nhắn Zalo để được báo giá nhanh nhất nhé!</p>
+          </div>
         ) : (
-          CATEGORIES.map((cat) => {
+          visibleCategories.map((cat) => {
             const catServices = getServices(cat.key);
             return (
               <section
@@ -177,10 +193,10 @@ const About = () => {
                 {/* Section Header */}
                 <div className="px-5 pt-5 pb-4 border-b border-stone-100 bg-[#FDFBF7]/50">
                   <div className="flex items-center gap-2">
-                    <span className="text-xl">{cat.emoji}</span>
+                    <span className="text-xl">{cat.icon}</span>
                     <div>
-                      <h3 className="font-serif font-bold text-stone-900 text-base">{cat.title}</h3>
-                      <p className="text-[10px] text-stone-400 mt-0.5">{cat.subtitle}</p>
+                      <h3 className="font-serif font-bold text-stone-900 text-base">{cat.name}</h3>
+                      <p className="text-[10px] text-stone-400 mt-0.5">{catServices.length} dịch vụ</p>
                     </div>
                   </div>
                 </div>
@@ -208,18 +224,8 @@ const About = () => {
                   </div>
                 )}
 
-                {/* Book CTA at bottom of each section */}
+                {/* Zalo CTA at bottom of each section */}
                 <div className="px-5 py-3 bg-stone-50/50 border-t border-stone-100">
-                  {/*
-                  <Link
-                    to="/booking"
-                    className="text-[11px] font-bold text-[#9E5E6F] hover:text-[#763A48] flex items-center gap-1 transition"
-                  >
-                    <Sparkles className="w-3 h-3" />
-                    Đặt lịch dịch vụ {cat.label}
-                    <ChevronRight className="w-3 h-3" />
-                  </Link>
-                  */}
                   <a
                     href="https://zalo.me/0358367919"
                     target="_blank"
@@ -227,7 +233,7 @@ const About = () => {
                     className="text-[11px] font-bold text-[#9E5E6F] hover:text-[#763A48] flex items-center gap-1 transition"
                   >
                     <Sparkles className="w-3 h-3" />
-                    Đặt lịch dịch vụ {cat.label}
+                    Đặt lịch dịch vụ {cat.name}
                     <ChevronRight className="w-3 h-3" />
                   </a>
                 </div>
@@ -237,16 +243,8 @@ const About = () => {
         )}
       </div>
 
-      {/* ── Floating Booking Button ── */}
+      {/* ── Floating Zalo Button ── */}
       <div className="fixed bottom-5 left-1/2 -translate-x-1/2 w-full max-w-xs px-4 z-30">
-        {/*
-        <Link
-          to="/booking"
-          className="flex items-center justify-center gap-2 py-3.5 bg-[#9E5E6F] hover:bg-[#8D5060] active:scale-95 text-white font-bold rounded-2xl shadow-lg shadow-[#9E5E6F]/35 transition text-sm w-full"
-        >
-          <CalendarIcon /> Đặt Lịch Ngay
-        </Link>
-        */}
         <a
           href="https://zalo.me/0358367919"
           target="_blank"

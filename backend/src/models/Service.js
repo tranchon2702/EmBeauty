@@ -7,25 +7,21 @@ const serviceSchema = new mongoose.Schema({
   },
   price: {
     type: Number,
-    required: true
+    required: true,
+    min: 0 // 0 is valid — complimentary / promotional items
   },
+  // Matches Category.key
   category: {
     type: String,
-    // nails = nail services
-    // eyelashes = lash extensions (Nối mi)
-    // washing = hair wash & massage (Gội đầu)
-    // makeup = makeup services
-    enum: ['nails', 'eyelashes', 'washing', 'makeup'],
-    required: true
-  },
-  duration: {
-    type: Number,
-    default: 60 // duration in minutes, used for booking conflict check
+    required: true,
+    index: true
   },
   description: {
     type: String,
     default: ''
   },
+  // Hides the service from the public price list and the invoice picker
+  // without deleting it, so the salon can pause an item seasonally.
   isActive: {
     type: Boolean,
     default: true

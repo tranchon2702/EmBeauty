@@ -1,10 +1,11 @@
 import express from 'express';
 import BankAccount from '../models/BankAccount.js';
+import { requireAuth, requireAdmin } from '../middleware/auth.js';
 
 const router = express.Router();
 
-// GET all bank accounts
-router.get('/', async (req, res) => {
+// GET all bank accounts — requires auth (staff needs for invoices)
+router.get('/', requireAuth, async (req, res) => {
   try {
     const list = await BankAccount.find();
     res.json(list);
@@ -14,7 +15,7 @@ router.get('/', async (req, res) => {
 });
 
 // POST create bank account
-router.post('/', async (req, res) => {
+router.post('/', requireAdmin, async (req, res) => {
   const { bankId, bankName, accountNumber, accountHolder, displayName, qrImageBase64 } = req.body;
 
   if (!bankId || !bankName || !accountNumber || !accountHolder || !displayName) {
@@ -39,7 +40,7 @@ router.post('/', async (req, res) => {
 });
 
 // PUT update bank account
-router.put('/:id', async (req, res) => {
+router.put('/:id', requireAdmin, async (req, res) => {
   const { id } = req.params;
   const { bankId, bankName, accountNumber, accountHolder, displayName, qrImageBase64 } = req.body;
 
@@ -64,7 +65,7 @@ router.put('/:id', async (req, res) => {
 });
 
 // DELETE bank account
-router.delete('/:id', async (req, res) => {
+router.delete('/:id', requireAdmin, async (req, res) => {
   const { id } = req.params;
   try {
     const account = await BankAccount.findByIdAndDelete(id);

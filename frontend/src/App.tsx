@@ -3,7 +3,6 @@ import { Toaster } from "sonner";
 import Index from "./pages/Index";
 import Tick from "./pages/Tick";
 import About from "./pages/About";
-import Booking from "./pages/Booking";
 import EmployeeLogin from "./pages/EmployeeLogin";
 import EmployeeDashboard from "./pages/EmployeeDashboard";
 import InvoiceCreate from "./pages/InvoiceCreate";
@@ -13,14 +12,25 @@ import EmployeeManagement from "./pages/EmployeeManagement";
 const App = () => {
   return (
     <>
-      <Toaster position="top-center" richColors closeButton />
+      <Toaster
+        position="bottom-center"
+        richColors
+        closeButton
+        duration={3500}
+        gap={8}
+        offset={20}
+        toastOptions={{
+          style: {
+            fontFamily: "'Outfit', system-ui, sans-serif",
+          },
+        }}
+      />
       <BrowserRouter>
         <Routes>
           {/* ── Customer Facing Routes ── */}
           <Route path="/" element={<Index />} />
           <Route path="/tick" element={<Tick />} />
           <Route path="/about" element={<About />} />
-          <Route path="/booking" element={<Booking />} />
 
           {/* ── Internal Staff Portal — primary route ── */}
           <Route path="/staff" element={<EmployeeLogin />} />

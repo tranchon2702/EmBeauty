@@ -1,11 +1,12 @@
 import React, { useState, useEffect, useCallback } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import {
   ArrowLeft, Phone, Search, Trash2, Plus, Minus, QrCode,
-  CheckCircle2, Edit3, AlertCircle, Receipt, ChevronDown, StickyNote, BadgePlus
+  CheckCircle2, Edit3, Receipt, StickyNote, BadgePlus
 } from "lucide-react";
 import { toast } from "sonner";
-import { API_BASE } from "../config";
+import { API_BASE, authFetch } from "../config";
+import { StyledSelect } from "../components/StyledSelect";
 
 interface ServiceItem {
   _id: string;
@@ -37,14 +38,7 @@ interface Employee {
   avatar?: string;
 }
 
-type InvoiceStatus = "idle" | "draft" | "pending_payment" | "paid";
-
-const CATEGORY_LABELS: Record<string, string> = {
-  nails: "💅 Nails",
-  eyelashes: "✨ Nối Mi",
-  washing: "🧴 Gội Đầu",
-  makeup: "💄 Makeup",
-};
+type InvoiceStatus = "idle" | "draft" | "paid";
 
 const InvoiceCreate = () => {
   const navigate = useNavigate();
@@ -54,6 +48,7 @@ const InvoiceCreate = () => {
 
   // Data from DB
   const [dbServices, setDbServices] = useState<ServiceItem[]>([]);
+  const [dbCategories, setDbCategories] = useState<{ _id: string; key: string; name: string; icon: string }[]>([]);
   const [bankAccounts, setBankAccounts] = useState<BankAccount[]>([]);
   const [employees, setEmployees] = useState<Employee[]>([]);
 
@@ -63,6 +58,7 @@ const InvoiceCreate = () => {
   const [customerName, setCustomerName] = useState("");
   const [customerPoints, setCustomerPoints] = useState<number | null>(null);
   const [checkingCustomer, setCheckingCustomer] = useState(false);
+  const [isNewCustomer, setIsNewCustomer] = useState(false);
 
   const [selectedServices, setSelectedServices] = useState<SelectedItem[]>([]);
   const [customServiceName, setCustomServiceName] = useState("");
@@ -95,16 +91,58 @@ const InvoiceCreate = () => {
     setSelectedEmployee(s._id); // default to current user
   }, [navigate]);
 
+  const [searchParams] = useSearchParams();
+  const editId = searchParams.get("id");
+
+  // ── Load existing draft if param ?id=... ─────────────────────────────────
+  useEffect(() => {
+    if (!editId) return;
+    const loadDraft = async () => {
+      try {
+        const res = await authFetch(`${API_BASE}/invoices/${editId}`);
+        if (res.ok) {
+          const inv = await res.json();
+          setInvoiceId(inv._id);
+          setInvoiceNumber(inv.invoiceNumber);
+          setInvoiceStatus(inv.status);
+          setCustomerPhone(inv.customerPhone || "");
+          setCustomerName(inv.customerName || "");
+          if (inv.employeeId) {
+            setSelectedEmployee(typeof inv.employeeId === "object" ? inv.employeeId._id : inv.employeeId);
+          }
+          if (Array.isArray(inv.services)) {
+            setSelectedServices(inv.services.map((s: any) => ({ name: s.name, price: s.price, quantity: s.quantity || 1 })));
+          }
+          setSurcharge(inv.surcharge || 0);
+          setSurchargeNote(inv.surchargeNote || "");
+          setDiscount(inv.discount || 0);
+          setInvoiceNote(inv.note || "");
+          setPaymentMethod(inv.paymentMethod || "cash");
+          if (inv.bankAccountId) {
+            setSelectedBankId(typeof inv.bankAccountId === "object" ? inv.bankAccountId._id : inv.bankAccountId);
+          }
+          toast.info(`Đã mở hóa đơn nháp ${inv.invoiceNumber}`);
+        }
+      } catch {
+        toast.error("Lỗi nạp hóa đơn nháp");
+      }
+    };
+    loadDraft();
+  }, [editId]);
+
   // ── Load data ─────────────────────────────────────────────────────────────
   useEffect(() => {
     const load = async () => {
       try {
-        const [srvRes, bankRes, empRes] = await Promise.all([
-          fetch(`${API_BASE}/services`),
-          fetch(`${API_BASE}/bank-accounts`),
-          fetch(`${API_BASE}/employees/list`),
+        const [srvRes, bankRes, empRes, catRes] = await Promise.all([
+          // Paused services stay out of the picker.
+          authFetch(`${API_BASE}/services?activeOnly=true`),
+          authFetch(`${API_BASE}/bank-accounts`),
+          authFetch(`${API_BASE}/employees/list`),
+          authFetch(`${API_BASE}/categories`),
         ]);
         if (srvRes.ok) setDbServices(await srvRes.json());
+        if (catRes.ok) setDbCategories(await catRes.json());
         if (bankRes.ok) {
           const banks = await bankRes.json();
           setBankAccounts(banks);
@@ -126,16 +164,18 @@ const InvoiceCreate = () => {
   const handleCheckCustomer = async () => {
     if (!customerPhone.trim()) { toast.warning("Nhập số điện thoại khách hàng"); return; }
     setCheckingCustomer(true);
-    setCustomerName(""); setCustomerPoints(null);
+    setCustomerName(""); setCustomerPoints(null); setIsNewCustomer(false);
     try {
-      const res = await fetch(`${API_BASE}/customers?phone=${customerPhone.trim()}`);
+      const res = await authFetch(`${API_BASE}/customers?phone=${customerPhone.trim()}`);
       if (res.ok) {
         const d = await res.json();
         setCustomerName(d.name); setCustomerPoints(d.points);
+        setIsNewCustomer(false);
         toast.success(`Khách hàng: ${d.name} — ${d.points} điểm`);
       } else {
-        setCustomerName("Khách hàng mới"); setCustomerPoints(0);
-        toast.info("Số điện thoại mới — sẽ tạo thành viên khi thanh toán");
+        setIsNewCustomer(true);
+        setCustomerName(""); setCustomerPoints(0);
+        toast.info("Khách hàng mới — nhập tên để đăng ký thành viên");
       }
     } catch { toast.error("Lỗi kết nối"); }
     finally { setCheckingCustomer(false); }
@@ -160,6 +200,15 @@ const InvoiceCreate = () => {
     });
   };
 
+  const setExactQty = (idx: number, val: number) => {
+    const qty = Math.max(1, Math.floor(val) || 1);
+    setSelectedServices(prev => {
+      const copy = [...prev];
+      copy[idx].quantity = qty;
+      return copy;
+    });
+  };
+
   const removeService = (idx: number) =>
     setSelectedServices(prev => prev.filter((_, i) => i !== idx));
 
@@ -172,6 +221,8 @@ const InvoiceCreate = () => {
   };
 
   // ── Build invoice payload ─────────────────────────────────────────────────
+  // totalAmount is deliberately NOT sent — the server recomputes it from the
+  // line items so the till can never post a figure that does not add up.
   const buildPayload = useCallback(() => ({
     employeeId: selectedEmployee,
     customerPhone: customerPhone.trim(),
@@ -180,30 +231,44 @@ const InvoiceCreate = () => {
     discount,
     surcharge,
     surchargeNote,
-    totalAmount,
     paymentMethod,
     bankAccountId: paymentMethod === "bank" ? selectedBankId || null : null,
     note: invoiceNote,
-  }), [selectedEmployee, customerPhone, customerName, selectedServices, discount, surcharge, surchargeNote, totalAmount, paymentMethod, selectedBankId, invoiceNote]);
+  }), [selectedEmployee, customerPhone, customerName, selectedServices, discount, surcharge, surchargeNote, paymentMethod, selectedBankId, invoiceNote]);
+
+  /** Adopt whatever the server stored, so the QR amount and the receipt agree. */
+  const syncFromServer = (inv: any) => {
+    if (Array.isArray(inv.services)) {
+      setSelectedServices(inv.services.map((s: any) => ({
+        name: s.name, price: s.price, quantity: s.quantity || 1,
+      })));
+    }
+    setDiscount(inv.discount || 0);
+    setSurcharge(inv.surcharge || 0);
+  };
 
   // ── Save/Update draft ─────────────────────────────────────────────────────
   const handleSaveDraft = async () => {
     if (!selectedEmployee) { toast.warning("Chọn thợ làm dịch vụ"); return; }
     if (selectedServices.length === 0) { toast.warning("Thêm ít nhất 1 dịch vụ"); return; }
+    if (isNewCustomer && customerPhone && !customerName.trim()) {
+      toast.warning("Nhập tên khách hàng mới để đăng ký tích điểm");
+      return;
+    }
 
     setLoading(true);
     try {
       let res, data;
       if (invoiceId) {
         // Update existing draft
-        res = await fetch(`${API_BASE}/invoices/${invoiceId}`, {
+        res = await authFetch(`${API_BASE}/invoices/${invoiceId}`, {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(buildPayload()),
         });
       } else {
         // Create new draft
-        res = await fetch(`${API_BASE}/invoices`, {
+        res = await authFetch(`${API_BASE}/invoices`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(buildPayload()),
@@ -214,6 +279,7 @@ const InvoiceCreate = () => {
       setInvoiceId(data._id);
       setInvoiceNumber(data.invoiceNumber);
       setInvoiceStatus("draft");
+      syncFromServer(data);
       toast.success(invoiceId ? "Đã cập nhật hóa đơn" : `Tạo hóa đơn ${data.invoiceNumber}`);
       setShowPayModal(true);
     } catch (err: any) {
@@ -226,7 +292,7 @@ const InvoiceCreate = () => {
     if (!invoiceId) return;
     setLoading(true);
     try {
-      const res = await fetch(`${API_BASE}/invoices/${invoiceId}/pay`, {
+      const res = await authFetch(`${API_BASE}/invoices/${invoiceId}/pay`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ paymentMethod, bankAccountId: paymentMethod === "bank" ? selectedBankId : null }),
@@ -234,7 +300,12 @@ const InvoiceCreate = () => {
       const data = await res.json();
       if (!res.ok) throw new Error(data.message);
       setInvoiceStatus("paid");
-      toast.success(`✅ Thanh toán thành công! ${data.pointsEarned > 0 ? `+${data.pointsEarned} điểm tích lũy` : ""}`);
+      toast.success(`✅ Thanh toán thành công!`);
+      // ── LOYALTY POINTS DISABLED (tạm tắt thông báo tích điểm) ──────────────
+      // toast.success(`✅ Thanh toán thành công! ${data.pointsEarned > 0 ? `+${data.pointsEarned} điểm tích lũy` : ""}`);
+      // The sale went through but the loyalty credit did not — the till needs
+      // to fix it manually. Toast a persistent warning so it is not missed.
+      // if (data.pointsWarning) toast.warning(data.pointsWarning, { duration: 10000 });
       setShowPayModal(false);
       // Navigate to dashboard after 1.5s
       setTimeout(() => navigate("/employee/dashboard"), 1500);
@@ -266,11 +337,17 @@ const InvoiceCreate = () => {
 
   const formatPrice = (p: number) => p.toLocaleString("vi-VN") + "đ";
 
+  const getCategoryLabel = (catKey: string) => {
+    const found = dbCategories.find(c => c.key === catKey);
+    if (found) return `${found.icon} ${found.name}`;
+    return catKey;
+  };
+
   const filteredServices = activeCategory === "all"
     ? dbServices
     : dbServices.filter(s => s.category === activeCategory);
 
-  const categories = ["all", ...Array.from(new Set(dbServices.map(s => s.category)))];
+  const categories = ["all", ...Array.from(new Set([...dbCategories.map(c => c.key), ...dbServices.map(s => s.category)]))];
 
   return (
     <div className="min-h-screen bg-[#FDFBF7] pb-20">
@@ -307,7 +384,15 @@ const InvoiceCreate = () => {
                   type="tel"
                   placeholder="Số điện thoại khách..."
                   value={customerPhone}
-                  onChange={e => setCustomerPhone(e.target.value.replace(/\D/g, ""))}
+                  onChange={e => {
+                    const newPhone = e.target.value.replace(/\D/g, "");
+                    setCustomerPhone(newPhone);
+                    if (customerName || customerPoints !== null || isNewCustomer) {
+                      setCustomerName("");
+                      setCustomerPoints(null);
+                      setIsNewCustomer(false);
+                    }
+                  }}
                   onKeyDown={e => e.key === "Enter" && handleCheckCustomer()}
                   className="w-full pl-9 pr-3 py-2 bg-stone-50 border border-stone-200 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-[#9E5E6F]/30"
                 />
@@ -320,10 +405,11 @@ const InvoiceCreate = () => {
                 <Search className="w-3.5 h-3.5" /> Tra cứu
               </button>
             </div>
-            {customerName && (
+            {/* KH cũ — hiện info */}
+            {customerName && !isNewCustomer && (
               <div className="mt-2.5 flex items-center justify-between bg-[#F9ECEF] rounded-xl px-3 py-2 text-xs animate-fade-in">
                 <div>
-                  <p className="text-[10px] text-stone-400">Tên khách</p>
+                  <p className="text-[10px] text-stone-400">Thành viên</p>
                   <p className="font-bold text-stone-800">{customerName}</p>
                 </div>
                 {customerPoints !== null && (
@@ -332,6 +418,26 @@ const InvoiceCreate = () => {
                     <p className="font-bold text-[#9E5E6F] font-serif text-sm">{customerPoints} điểm</p>
                   </div>
                 )}
+              </div>
+            )}
+
+            {/* KH mới — form nhập tên */}
+            {isNewCustomer && (
+              <div className="mt-2.5 space-y-2 animate-fade-in">
+                <div className="flex items-center gap-2 bg-emerald-50 rounded-xl px-3 py-2">
+                  <BadgePlus className="w-4 h-4 text-emerald-600 shrink-0" />
+                  <div className="flex-1">
+                    <p className="text-[10px] font-bold text-emerald-700">Khách hàng mới</p>
+                    <p className="text-[10px] text-emerald-600">Nhập tên để đăng ký thành viên tích điểm</p>
+                  </div>
+                </div>
+                <input
+                  type="text"
+                  placeholder="Tên khách hàng (VD: Nguyễn Thị Lan)"
+                  value={customerName}
+                  onChange={e => setCustomerName(e.target.value)}
+                  className="w-full px-3 py-2 bg-stone-50 border border-stone-200 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-emerald-400/30 placeholder:text-stone-300"
+                />
               </div>
             )}
           </div>
@@ -348,7 +454,7 @@ const InvoiceCreate = () => {
                     : "bg-stone-50 border-stone-200 text-stone-500 hover:border-stone-300"
                     }`}
                 >
-                  {cat === "all" ? "🔖 Tất cả" : CATEGORY_LABELS[cat] || cat}
+                  {cat === "all" ? "🔖 Tất cả" : getCategoryLabel(cat)}
                 </button>
               ))}
             </div>
@@ -364,7 +470,7 @@ const InvoiceCreate = () => {
                     className="p-3 bg-stone-50 border border-stone-150 hover:bg-[#F9ECEF] hover:border-[#9E5E6F]/30 rounded-xl transition text-left flex flex-col gap-1 group"
                   >
                     <span className="text-[10px] text-stone-400 font-semibold">
-                      {CATEGORY_LABELS[srv.category] || srv.category}
+                      {getCategoryLabel(srv.category)}
                     </span>
                     <span className="text-[11px] font-semibold text-stone-750 line-clamp-2 leading-snug group-hover:text-[#9E5E6F] transition">
                       {srv.name}
@@ -413,16 +519,17 @@ const InvoiceCreate = () => {
             {/* Staff selector */}
             <div>
               <p className="text-[10px] font-bold text-stone-400 uppercase tracking-wider mb-1.5">Thợ thực hiện *</p>
-              <select
+              <StyledSelect
                 value={selectedEmployee}
-                onChange={e => setSelectedEmployee(e.target.value)}
-                className="w-full px-3 py-2 bg-stone-50 border border-stone-200 rounded-xl text-xs font-semibold text-stone-750 focus:outline-none"
-              >
-                <option value="">-- Chọn Thợ --</option>
-                {employees.map(e => (
-                  <option key={e._id} value={e._id}>{e.name} {e.role === "admin" ? "(Quản lý)" : ""}</option>
-                ))}
-              </select>
+                onChange={setSelectedEmployee}
+                placeholder="-- Chọn Thợ --"
+                size="md"
+                options={employees.map(e => ({
+                  value: e._id,
+                  label: `${e.name}${e.role === "admin" ? " (Quản lý)" : ""}`,
+                  icon: e.role === "admin" ? "👑" : "💇",
+                }))}
+              />
             </div>
 
             {/* Selected services list */}
@@ -443,7 +550,13 @@ const InvoiceCreate = () => {
                       </div>
                       <div className="flex items-center gap-0.5 bg-white border border-stone-200 rounded-lg p-0.5 shrink-0">
                         <button onClick={() => updateQty(idx, -1)} className="p-1 hover:bg-stone-50 text-stone-500 rounded transition"><Minus className="w-3 h-3" /></button>
-                        <span className="px-1.5 font-bold text-stone-700 text-xs min-w-5 text-center">{srv.quantity}</span>
+                        <input
+                          type="number"
+                          min={1}
+                          value={srv.quantity}
+                          onChange={e => setExactQty(idx, parseInt(e.target.value, 10) || 1)}
+                          className="w-9 text-center font-bold text-stone-800 text-xs bg-stone-50 rounded border border-stone-200 focus:border-[#9E5E6F] focus:outline-none py-0.5"
+                        />
                         <button onClick={() => updateQty(idx, 1)} className="p-1 hover:bg-stone-50 text-stone-500 rounded transition"><Plus className="w-3 h-3" /></button>
                       </div>
                       <button onClick={() => removeService(idx)} className="p-1 text-stone-300 hover:text-red-500 transition shrink-0">
@@ -558,12 +671,15 @@ const InvoiceCreate = () => {
             <button
               onClick={handleSaveDraft}
               disabled={loading || selectedServices.length === 0}
-              className="w-full py-3 bg-[#9E5E6F] hover:bg-[#8D5060] disabled:bg-stone-300 text-white font-bold rounded-xl text-xs transition uppercase tracking-wider flex items-center justify-center gap-2 shadow-md"
+              className={`w-full py-3 ${paymentMethod === "cash" ? "bg-emerald-600 hover:bg-emerald-700" : "bg-[#9E5E6F] hover:bg-[#8D5060]"} disabled:bg-stone-300 text-white font-bold rounded-xl text-xs transition uppercase tracking-wider flex items-center justify-center gap-2 shadow-md`}
             >
               {loading ? "Đang xử lý..." : (
                 <>
-                  <Receipt className="w-4 h-4" />
-                  {invoiceStatus === "draft" ? "Cập nhật & Thanh toán" : "Tạo hóa đơn & Chọn QR"}
+                  {paymentMethod === "cash" ? (
+                    <><CheckCircle2 className="w-4 h-4" /> {invoiceStatus === "draft" ? "Cập nhật & Thanh toán" : "Lưu & Thanh toán tiền mặt"}</>
+                  ) : (
+                    <><QrCode className="w-4 h-4" /> {invoiceStatus === "draft" ? "Cập nhật & Chọn QR" : "Tạo hóa đơn & Chọn QR"}</>
+                  )}
                 </>
               )}
             </button>

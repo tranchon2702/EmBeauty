@@ -1,9 +1,30 @@
 import express from 'express';
+import mongoose from 'mongoose';
 import Employee from '../models/Employee.js';
+import { requireAuth, requireAdmin, generateAccessToken, generateRefreshToken, verifyRefreshToken } from '../middleware/auth.js';
+import { rateLimit, clearRateLimit } from '../middleware/rateLimit.js';
 
 const router = express.Router();
 
-// Public route to list employees for the login/stylist selection screen (no avatar for perf)
+// A PIN is only 4 digits, and the employee list is public so the login screen
+// can show faces — without throttling, all 10.000 combinations are walkable.
+const loginKey = (req) => `login:${req.body?.employeeId || 'unknown'}`;
+
+const throttleLoginPerAccount = rateLimit({
+  windowMs: 10 * 60 * 1000,
+  max: 8,
+  keyFn: loginKey,
+  message: 'Bạn đã nhập sai mã PIN quá nhiều lần. Vui lòng thử lại sau 10 phút hoặc nhờ quản lý đặt lại PIN.',
+});
+
+const throttleLoginPerDevice = rateLimit({
+  windowMs: 10 * 60 * 1000,
+  max: 30,
+  keyFn: (req) => `login-ip:${req.ip}`,
+  message: 'Quá nhiều lần đăng nhập từ thiết bị này. Vui lòng thử lại sau ít phút.',
+});
+
+// ─── PUBLIC: List employees for login screen ─────────────────────────────────
 router.get('/list', async (req, res) => {
   try {
     const list = await Employee.find({ status: 'active' }, 'name role avatar bio');
@@ -13,12 +34,15 @@ router.get('/list', async (req, res) => {
   }
 });
 
-// Employee Login (verify PIN)
-router.post('/login', async (req, res) => {
+// ─── PUBLIC: Employee Login (verify PIN → return JWT) ────────────────────────
+router.post('/login', throttleLoginPerDevice, throttleLoginPerAccount, async (req, res) => {
   const { employeeId, pin } = req.body;
 
   if (!employeeId || !pin) {
-    return res.status(400).json({ message: 'Employee and PIN are required' });
+    return res.status(400).json({ message: 'Vui lòng chọn nhân viên và nhập mã PIN' });
+  }
+  if (!mongoose.Types.ObjectId.isValid(employeeId)) {
+    return res.status(400).json({ message: 'Nhân viên không hợp lệ' });
   }
 
   try {
@@ -27,52 +51,151 @@ router.post('/login', async (req, res) => {
       return res.status(404).json({ message: 'Không tìm thấy nhân viên hoặc tài khoản đã bị vô hiệu hoá' });
     }
 
-    if (employee.pin !== pin.trim()) {
+    const pinMatch = await employee.comparePin(pin.trim());
+    if (!pinMatch) {
       return res.status(401).json({ message: 'Mã PIN không đúng. Vui lòng thử lại.' });
     }
 
-    // Success - return session data
+    // A correct PIN clears the failure counter so a staff member who fat-fingers
+    // it a few times is not locked out for the rest of their shift.
+    clearRateLimit(loginKey(req));
+
+    const accessToken = generateAccessToken(employee);
+    const refreshToken = generateRefreshToken(employee);
+
     res.json({
-      _id: employee._id,
-      name: employee.name,
-      role: employee.role,
-      phone: employee.phone,
-      avatar: employee.avatar || '',
-      bio: employee.bio || ''
+      accessToken,
+      refreshToken,
+      user: {
+        _id: employee._id,
+        name: employee.name,
+        role: employee.role,
+        phone: employee.phone,
+        avatar: employee.avatar || '',
+        bio: employee.bio || '',
+        mustChangePin: employee.mustChangePin || false
+      }
     });
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
 });
 
-// Get all employees (Admin view)
-router.get('/', async (req, res) => {
+// ─── PUBLIC: Refresh access token ────────────────────────────────────────────
+router.post('/refresh', async (req, res) => {
+  const { refreshToken } = req.body;
+  if (!refreshToken) {
+    return res.status(400).json({ message: 'Refresh token là bắt buộc' });
+  }
+
   try {
-    // Exclude avatar from list view for performance; only fetch when needed
-    const list = await Employee.find({}, '-avatar');
+    const decoded = verifyRefreshToken(refreshToken);
+    const employee = await Employee.findById(decoded.id);
+    if (!employee || employee.status !== 'active') {
+      return res.status(401).json({ code: 'INVALID_REFRESH', message: 'Tài khoản không hợp lệ' });
+    }
+
+    const newAccessToken = generateAccessToken(employee);
+    res.json({ accessToken: newAccessToken });
+  } catch (err) {
+    return res.status(401).json({ code: 'REFRESH_EXPIRED', message: 'Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.' });
+  }
+});
+
+// ─── AUTH: Change own PIN (employee self-service) ────────────────────────────
+router.patch('/:id/change-pin', requireAuth, async (req, res) => {
+  const { id } = req.params;
+  const { currentPin, newPin } = req.body;
+
+  // Only allow changing own PIN
+  if (req.user.id !== id) {
+    return res.status(403).json({ message: 'Bạn chỉ có thể đổi mã PIN của chính mình' });
+  }
+
+  if (!newPin || newPin.trim().length !== 4 || !/^\d{4}$/.test(newPin.trim())) {
+    return res.status(400).json({ message: 'Mã PIN mới phải là 4 chữ số' });
+  }
+
+  try {
+    const employee = await Employee.findById(id);
+    if (!employee) return res.status(404).json({ message: 'Không tìm thấy nhân viên' });
+
+    // If mustChangePin is true (after admin reset), currentPin is not required
+    if (!employee.mustChangePin) {
+      if (!currentPin) {
+        return res.status(400).json({ message: 'Vui lòng nhập mã PIN hiện tại' });
+      }
+      const pinMatch = await employee.comparePin(currentPin.trim());
+      if (!pinMatch) {
+        return res.status(401).json({ message: 'Mã PIN hiện tại không đúng' });
+      }
+    }
+
+    employee.pin = newPin.trim();
+    employee.mustChangePin = false;
+    await employee.save();
+
+    res.json({ message: 'Đã đổi mã PIN thành công! 🎉' });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
+// ─── ADMIN: Reset PIN for any employee ───────────────────────────────────────
+router.patch('/:id/reset-pin', requireAdmin, async (req, res) => {
+  const { id } = req.params;
+  const { newPin } = req.body;
+
+  if (!newPin || newPin.trim().length !== 4 || !/^\d{4}$/.test(newPin.trim())) {
+    return res.status(400).json({ message: 'Mã PIN mới phải là 4 chữ số' });
+  }
+
+  try {
+    const employee = await Employee.findById(id);
+    if (!employee) return res.status(404).json({ message: 'Không tìm thấy nhân viên' });
+
+    employee.pin = newPin.trim();
+    employee.mustChangePin = true; // Force change on next login
+    await employee.save();
+
+    res.json({ message: `Đã đặt lại PIN cho ${employee.name}. Nhân viên sẽ phải đổi PIN khi đăng nhập lần sau.` });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
+// ─── ADMIN: Get all employees ────────────────────────────────────────────────
+router.get('/', requireAdmin, async (req, res) => {
+  try {
+    // Exclude avatar and pin from list view for performance/security
+    const list = await Employee.find({}, '-avatar -pin');
     res.json(list);
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
 });
 
-// Get single employee (for avatar edit)
-router.get('/:id', async (req, res) => {
+// ─── AUTH: Get single employee ───────────────────────────────────────────────
+router.get('/:id', requireAuth, async (req, res) => {
   try {
-    const employee = await Employee.findById(req.params.id);
-    if (!employee) return res.status(404).json({ message: 'Employee not found' });
+    const employee = await Employee.findById(req.params.id).select('-pin');
+    if (!employee) return res.status(404).json({ message: 'Không tìm thấy nhân viên' });
     res.json(employee);
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
 });
 
-// Create new employee (Admin)
-router.post('/', async (req, res) => {
+// ─── ADMIN: Create new employee ──────────────────────────────────────────────
+router.post('/', requireAdmin, async (req, res) => {
   const { name, phone, pin, role, avatar, bio } = req.body;
 
   if (!name || !phone || !pin) {
-    return res.status(400).json({ message: 'Name, phone, and PIN are required' });
+    return res.status(400).json({ message: 'Tên, số điện thoại và mã PIN là bắt buộc' });
+  }
+
+  if (pin.trim().length !== 4 || !/^\d{4}$/.test(pin.trim())) {
+    return res.status(400).json({ message: 'Mã PIN phải là 4 chữ số' });
   }
 
   try {
@@ -86,45 +209,57 @@ router.post('/', async (req, res) => {
     });
 
     await employee.save();
-    res.status(201).json(employee);
+
+    // Return without pin hash
+    const result = employee.toObject();
+    delete result.pin;
+    res.status(201).json(result);
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
 });
 
-// Update employee (Admin or self for avatar/bio)
-router.put('/:id', async (req, res) => {
+// ─── ADMIN: Update employee ──────────────────────────────────────────────────
+router.put('/:id', requireAdmin, async (req, res) => {
   const { id } = req.params;
-  const { name, phone, pin, role, status, avatar, bio } = req.body;
+  const { name, phone, role, status, avatar, bio } = req.body;
 
   try {
     const employee = await Employee.findById(id);
     if (!employee) {
-      return res.status(404).json({ message: 'Employee not found' });
+      return res.status(404).json({ message: 'Không tìm thấy nhân viên' });
     }
 
     if (name !== undefined) employee.name = name.trim();
     if (phone !== undefined) employee.phone = phone.trim();
-    if (pin !== undefined && pin.trim()) employee.pin = pin.trim();
+    // PIN is NOT updatable via PUT — use reset-pin or change-pin instead
     if (role !== undefined) employee.role = role;
     if (status !== undefined) employee.status = status;
     if (avatar !== undefined) employee.avatar = avatar;
     if (bio !== undefined) employee.bio = bio;
 
     await employee.save();
-    res.json(employee);
+
+    const result = employee.toObject();
+    delete result.pin;
+    res.json(result);
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
 });
 
-// PATCH self avatar (employee updates own photo — no admin needed)
-router.patch('/:id/avatar', async (req, res) => {
+// ─── AUTH: Update own avatar ─────────────────────────────────────────────────
+router.patch('/:id/avatar', requireAuth, async (req, res) => {
   const { id } = req.params;
   const { avatar } = req.body;
 
+  // Only allow updating own avatar (or admin)
+  if (req.user.id !== id && req.user.role !== 'admin') {
+    return res.status(403).json({ message: 'Bạn chỉ có thể cập nhật ảnh của chính mình' });
+  }
+
   if (!avatar) {
-    return res.status(400).json({ message: 'Avatar image data is required' });
+    return res.status(400).json({ message: 'Dữ liệu ảnh là bắt buộc' });
   }
 
   try {
@@ -132,25 +267,25 @@ router.patch('/:id/avatar', async (req, res) => {
       id,
       { avatar },
       { new: true }
-    );
-    if (!employee) return res.status(404).json({ message: 'Employee not found' });
-    res.json({ message: 'Avatar updated successfully', avatar: employee.avatar });
+    ).select('-pin');
+    if (!employee) return res.status(404).json({ message: 'Không tìm thấy nhân viên' });
+    res.json({ message: 'Cập nhật ảnh thành công', avatar: employee.avatar });
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
 });
 
-// Delete employee/mark inactive
-router.delete('/:id', async (req, res) => {
+// ─── ADMIN: Delete/deactivate employee ───────────────────────────────────────
+router.delete('/:id', requireAdmin, async (req, res) => {
   const { id } = req.params;
   try {
     const employee = await Employee.findById(id);
     if (!employee) {
-      return res.status(404).json({ message: 'Employee not found' });
+      return res.status(404).json({ message: 'Không tìm thấy nhân viên' });
     }
     employee.status = 'inactive';
     await employee.save();
-    res.json({ message: 'Employee marked as inactive' });
+    res.json({ message: 'Đã vô hiệu hóa nhân viên' });
   } catch (error) {
     res.status(500).json({ message: error.message });
   }

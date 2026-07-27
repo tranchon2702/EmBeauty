@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from "react";
 import { useNavigate, Link } from "react-router-dom";
-import { ArrowLeft, ShieldCheck, ChevronRight, RotateCcw, Scissors, Delete } from "lucide-react";
+import { ArrowLeft, ShieldCheck, ChevronRight, RotateCcw, Scissors, KeyRound } from "lucide-react";
 import { toast } from "sonner";
-import { API_BASE } from "../config";
+import { API_BASE, setTokens, clearSession, getSession } from "../config";
 
 interface EmployeeBrief {
   _id: string;
@@ -20,10 +20,17 @@ const EmployeeLogin = () => {
   const [loading, setLoading] = useState(false);
   const [fetching, setFetching] = useState(true);
 
+  // ── Forced PIN change state ──
+  const [mustChangePin, setMustChangePin] = useState(false);
+  const [changePinUser, setChangePinUser] = useState<{ _id: string; name: string } | null>(null);
+  const [newPin, setNewPin] = useState("");
+  const [confirmPin, setConfirmPin] = useState("");
+  const [changePinStep, setChangePinStep] = useState<"new" | "confirm">("new");
+
   // Check if already logged in
   useEffect(() => {
-    const existing = localStorage.getItem("embeauty_session");
-    if (existing) {
+    const session = getSession();
+    if (session && !session.mustChangePin) {
       navigate("/employee/dashboard");
       return;
     }
@@ -51,22 +58,65 @@ const EmployeeLogin = () => {
   };
 
   const handleBack = () => {
+    if (mustChangePin) {
+      setMustChangePin(false);
+      setChangePinUser(null);
+      setNewPin("");
+      setConfirmPin("");
+      setChangePinStep("new");
+      clearSession();
+      return;
+    }
     setSelectedEmp(null);
     setPin("");
   };
 
   const handlePinInput = (digit: string) => {
+    if (mustChangePin) {
+      if (changePinStep === "new") {
+        if (newPin.length < 4) {
+          const val = newPin + digit;
+          setNewPin(val);
+          if (val.length === 4) {
+            setTimeout(() => setChangePinStep("confirm"), 200);
+          }
+        }
+      } else {
+        if (confirmPin.length < 4) {
+          const val = confirmPin + digit;
+          setConfirmPin(val);
+          if (val.length === 4) {
+            setTimeout(() => submitChangePin(val), 200);
+          }
+        }
+      }
+      return;
+    }
+
     if (pin.length < 4) {
-      const newPin = pin + digit;
-      setPin(newPin);
-      if (newPin.length === 4) {
-        // Auto-submit when 4 digits entered
-        setTimeout(() => submitLogin(newPin), 100);
+      const newPinVal = pin + digit;
+      setPin(newPinVal);
+      if (newPinVal.length === 4) {
+        setTimeout(() => submitLogin(newPinVal), 100);
       }
     }
   };
 
-  const handlePinDelete = () => setPin(p => p.slice(0, -1));
+  const handlePinDelete = () => {
+    if (mustChangePin) {
+      if (changePinStep === "confirm") {
+        if (confirmPin.length > 0) {
+          setConfirmPin(p => p.slice(0, -1));
+        } else {
+          setChangePinStep("new");
+        }
+      } else {
+        setNewPin(p => p.slice(0, -1));
+      }
+      return;
+    }
+    setPin(p => p.slice(0, -1));
+  };
 
   const submitLogin = async (pinValue: string) => {
     if (!selectedEmp || !pinValue || pinValue.length < 4) return;
@@ -86,12 +136,78 @@ const EmployeeLogin = () => {
         return;
       }
 
-      localStorage.setItem("embeauty_session", JSON.stringify(data));
-      toast.success(`Chào mừng, ${data.name}! 👋`);
+      // Store tokens
+      setTokens(data.accessToken, data.refreshToken);
+      localStorage.setItem("embeauty_session", JSON.stringify(data.user));
+
+      // Check if must change PIN
+      if (data.user.mustChangePin) {
+        setMustChangePin(true);
+        setChangePinUser({ _id: data.user._id, name: data.user.name });
+        setPin("");
+        setNewPin("");
+        setConfirmPin("");
+        setChangePinStep("new");
+        toast.info("Bạn cần đặt mã PIN mới cho riêng mình 🔐");
+        setLoading(false);
+        return;
+      }
+
+      toast.success(`Chào mừng, ${data.user.name}! 👋`);
       navigate("/employee/dashboard");
     } catch {
       toast.error("Lỗi kết nối máy chủ");
       setPin("");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const submitChangePin = async (confirmValue: string) => {
+    if (!changePinUser) return;
+
+    if (newPin !== confirmValue) {
+      toast.error("Mã PIN xác nhận không khớp. Thử lại nhé!");
+      setConfirmPin("");
+      setChangePinStep("new");
+      setNewPin("");
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const token = localStorage.getItem("embeauty_token");
+      const res = await fetch(`${API_BASE}/employees/${changePinUser._id}/change-pin`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${token}`,
+        },
+        body: JSON.stringify({ newPin }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        toast.error(data.message || "Lỗi đổi PIN");
+        setNewPin("");
+        setConfirmPin("");
+        setChangePinStep("new");
+        setLoading(false);
+        return;
+      }
+
+      // Update session to remove mustChangePin
+      const session = getSession();
+      if (session) {
+        session.mustChangePin = false;
+        localStorage.setItem("embeauty_session", JSON.stringify(session));
+      }
+
+      toast.success("Đổi mã PIN thành công! 🎉");
+      setMustChangePin(false);
+      navigate("/employee/dashboard");
+    } catch {
+      toast.error("Lỗi kết nối máy chủ");
     } finally {
       setLoading(false);
     }
@@ -115,6 +231,15 @@ const EmployeeLogin = () => {
     "bg-teal-100 text-teal-600",
   ];
 
+  // Current PIN display
+  const currentPinValue = mustChangePin
+    ? (changePinStep === "new" ? newPin : confirmPin)
+    : pin;
+
+  const pinLabel = mustChangePin
+    ? (changePinStep === "new" ? "Nhập mã PIN mới (4 số)" : "Xác nhận lại mã PIN mới")
+    : "Nhập mã PIN 4 chữ số";
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-[#F9ECEF] via-[#FDFBF7] to-[#F0EAE5] flex flex-col items-center justify-center p-4">
       {/* Logo / Brand */}
@@ -128,7 +253,7 @@ const EmployeeLogin = () => {
 
       <div className="w-full max-w-sm">
         {/* ── Step 1: Select Employee ── */}
-        {!selectedEmp && (
+        {!selectedEmp && !mustChangePin && (
           <div className="bg-white rounded-3xl shadow-xl shadow-stone-200/50 border border-stone-100 overflow-hidden">
             <div className="px-5 pt-5 pb-3 border-b border-stone-100">
               <p className="text-xs font-bold text-stone-400 uppercase tracking-wider">Chọn tài khoản nhân viên</p>
@@ -191,8 +316,8 @@ const EmployeeLogin = () => {
           </div>
         )}
 
-        {/* ── Step 2: PIN Entry ── */}
-        {selectedEmp && (
+        {/* ── Step 2: PIN Entry / Forced PIN Change ── */}
+        {(selectedEmp || mustChangePin) && (
           <div className="bg-white rounded-3xl shadow-xl shadow-stone-200/50 border border-stone-100 overflow-hidden">
             <div className="px-5 pt-5 pb-4 border-b border-stone-100 flex items-center gap-3">
               <button onClick={handleBack} className="p-1.5 hover:bg-stone-100 rounded-full transition text-stone-500">
@@ -200,32 +325,65 @@ const EmployeeLogin = () => {
               </button>
 
               {/* Employee preview */}
-              <div className="w-10 h-10 rounded-xl overflow-hidden shrink-0">
-                {selectedEmp.avatar ? (
-                  <img src={selectedEmp.avatar} alt={selectedEmp.name} className="w-full h-full object-cover" />
-                ) : (
-                  <div className="w-full h-full bg-[#F9ECEF] flex items-center justify-center font-bold text-sm text-[#9E5E6F]">
-                    {getAvatarInitials(selectedEmp.name)}
+              {mustChangePin && changePinUser ? (
+                <>
+                  <div className="w-10 h-10 rounded-xl bg-amber-50 flex items-center justify-center shrink-0">
+                    <KeyRound className="w-5 h-5 text-amber-600" />
                   </div>
-                )}
-              </div>
-
-              <div>
-                <p className="font-bold text-stone-800 text-sm">{selectedEmp.name}</p>
-                <p className="text-[10px] text-stone-400">{selectedEmp.role === "admin" ? "Quản trị viên" : "Nhân viên"}</p>
-              </div>
+                  <div>
+                    <p className="font-bold text-stone-800 text-sm">{changePinUser.name}</p>
+                    <p className="text-[10px] text-amber-600 font-semibold">🔐 Đặt mã PIN mới</p>
+                  </div>
+                </>
+              ) : selectedEmp && (
+                <>
+                  <div className="w-10 h-10 rounded-xl overflow-hidden shrink-0">
+                    {selectedEmp.avatar ? (
+                      <img src={selectedEmp.avatar} alt={selectedEmp.name} className="w-full h-full object-cover" />
+                    ) : (
+                      <div className="w-full h-full bg-[#F9ECEF] flex items-center justify-center font-bold text-sm text-[#9E5E6F]">
+                        {getAvatarInitials(selectedEmp.name)}
+                      </div>
+                    )}
+                  </div>
+                  <div>
+                    <p className="font-bold text-stone-800 text-sm">{selectedEmp.name}</p>
+                    <p className="text-[10px] text-stone-400">{selectedEmp.role === "admin" ? "Quản trị viên" : "Nhân viên"}</p>
+                  </div>
+                </>
+              )}
             </div>
 
             <div className="px-5 py-6 space-y-6">
+              {/* Forced change info banner */}
+              {mustChangePin && (
+                <div className="bg-amber-50 border border-amber-100 rounded-2xl p-3 text-center">
+                  <p className="text-[11px] text-amber-700 font-semibold">
+                    Admin đã đặt lại PIN cho bạn. Hãy tạo mã PIN riêng để bảo mật tài khoản.
+                  </p>
+                </div>
+              )}
+
               {/* PIN indicator dots */}
               <div className="text-center">
-                <p className="text-xs text-stone-400 mb-4 font-semibold">Nhập mã PIN 4 chữ số</p>
+                <p className="text-xs text-stone-400 mb-4 font-semibold">{pinLabel}</p>
+
+                {/* Step indicators for forced change */}
+                {mustChangePin && (
+                  <div className="flex items-center justify-center gap-2 mb-4">
+                    <div className={`h-1 w-8 rounded-full transition-all ${changePinStep === "new" ? "bg-amber-500" : "bg-emerald-500"}`} />
+                    <div className={`h-1 w-8 rounded-full transition-all ${changePinStep === "confirm" ? "bg-amber-500" : "bg-stone-200"}`} />
+                  </div>
+                )}
+
                 <div className="flex justify-center gap-4">
                   {[0, 1, 2, 3].map(i => (
                     <div
                       key={i}
-                      className={`w-4 h-4 rounded-full border-2 transition-all duration-150 ${pin.length > i
-                        ? "bg-[#9E5E6F] border-[#9E5E6F] scale-110"
+                      className={`w-4 h-4 rounded-full border-2 transition-all duration-150 ${currentPinValue.length > i
+                        ? mustChangePin
+                          ? "bg-amber-500 border-amber-500 scale-110"
+                          : "bg-[#9E5E6F] border-[#9E5E6F] scale-110"
                         : "bg-white border-stone-300"
                         }`}
                     />

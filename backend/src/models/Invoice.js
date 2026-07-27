@@ -14,10 +14,18 @@ const invoiceSchema = new mongoose.Schema({
     type: String,
     default: ''
   },
+  // The technician credited with the work — drives the performance report.
   employeeId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Employee',
-    required: true
+    required: true,
+    index: true
+  },
+  // Who actually rang the invoice up. Staff may only edit their own; admins any.
+  createdBy: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Employee',
+    index: true
   },
   services: [
     {
@@ -26,6 +34,11 @@ const invoiceSchema = new mongoose.Schema({
       quantity: { type: Number, default: 1 }
     }
   ],
+  // Every money field below is recomputed server-side from `services`.
+  subTotal: {
+    type: Number,
+    default: 0
+  },
   discount: {
     type: Number,
     default: 0
@@ -44,18 +57,20 @@ const invoiceSchema = new mongoose.Schema({
   },
   paymentMethod: {
     type: String,
-    enum: ['cash', 'bank', 'mixed'],
+    enum: ['cash', 'bank'],
     default: 'cash'
   },
-  // Payment status lifecycle: draft → pending_payment → paid
   status: {
     type: String,
-    enum: ['draft', 'pending_payment', 'paid', 'cancelled'],
-    default: 'draft'
+    enum: ['draft', 'paid', 'cancelled'],
+    default: 'draft',
+    index: true
   },
+  // Set the moment payment is confirmed. All revenue reporting keys off this.
   paidAt: {
     type: Date,
-    default: null
+    default: null,
+    index: true
   },
   bankAccountId: {
     type: mongoose.Schema.Types.ObjectId,
@@ -73,6 +88,10 @@ const invoiceSchema = new mongoose.Schema({
 }, {
   timestamps: true
 });
+
+// Supports "paid invoices in a date range, optionally per employee".
+invoiceSchema.index({ status: 1, paidAt: -1 });
+invoiceSchema.index({ createdAt: -1 });
 
 const Invoice = mongoose.model('Invoice', invoiceSchema);
 export default Invoice;

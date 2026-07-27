@@ -1,90 +1,90 @@
 import express from 'express';
 import Settings from '../models/Settings.js';
+import { requireAdmin } from '../middleware/auth.js';
 
 const router = express.Router();
 
-// Get settings (exclude sensitive bot token from general access in the future)
+/** There is exactly one settings document; create it lazily on first read. */
+export const getSettings = async () => {
+  let settings = await Settings.findOne();
+  if (!settings) settings = await new Settings().save();
+  return settings;
+};
+
+const cleanList = (value) =>
+  Array.isArray(value)
+    ? value.map((v) => String(v).trim()).filter(Boolean)
+    : null;
+
+// ─── PUBLIC: salon info, welcome messages and loyalty tiers ──────────────────
+// Everything stored here is customer-facing by design (the homepage, the price
+// list and the membership card all read it), so nothing needs masking.
 router.get('/', async (req, res) => {
   try {
-    let settings = await Settings.findOne();
-    if (!settings) {
-      settings = new Settings();
-      await settings.save();
-    }
-    res.json(settings);
+    res.json(await getSettings());
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
 });
 
-// Update settings
-router.put('/', async (req, res) => {
+// ─── ADMIN: update settings ──────────────────────────────────────────────────
+router.put('/', requireAdmin, async (req, res) => {
   const {
-    pointRewardRate,
-    telegramBotToken,
-    telegramChatId,
-    telegramNotificationsEnabled,
-    salonName,
-    salonPhone,
-    welcomeMessages,
-    salonAddress,
-    salonHours,
-    googleMapsUrl,
-    facebookUrl
+    pointRewardRate, salonName, salonPhone, salonAddress,
+    salonHours, googleMapsUrl, facebookUrl, welcomeMessages, rankSettings,
   } = req.body;
 
   try {
-    let settings = await Settings.findOne();
-    if (!settings) {
-      settings = new Settings();
+    const settings = await getSettings();
+
+    if (pointRewardRate !== undefined) {
+      const rate = Number(pointRewardRate);
+      if (!Number.isFinite(rate) || rate < 0 || rate > 100) {
+        return res.status(400).json({ message: 'Tỉ lệ tích điểm phải nằm trong khoảng 0 – 100' });
+      }
+      settings.pointRewardRate = rate;
     }
 
-    if (pointRewardRate !== undefined) settings.pointRewardRate = Number(pointRewardRate);
-    if (telegramBotToken !== undefined) settings.telegramBotToken = telegramBotToken.trim();
-    if (telegramChatId !== undefined) settings.telegramChatId = telegramChatId.trim();
-    if (telegramNotificationsEnabled !== undefined) settings.telegramNotificationsEnabled = Boolean(telegramNotificationsEnabled);
-    if (salonName !== undefined) settings.salonName = salonName.trim();
-    if (salonPhone !== undefined) settings.salonPhone = salonPhone.trim();
-    if (salonAddress !== undefined) settings.salonAddress = salonAddress.trim();
-    if (salonHours !== undefined) settings.salonHours = salonHours.trim();
-    if (googleMapsUrl !== undefined) settings.googleMapsUrl = googleMapsUrl.trim();
-    if (facebookUrl !== undefined) settings.facebookUrl = facebookUrl.trim();
-    if (welcomeMessages !== undefined && Array.isArray(welcomeMessages)) {
-      settings.welcomeMessages = welcomeMessages.filter(m => typeof m === 'string' && m.trim());
+    const text = { salonName, salonPhone, salonAddress, salonHours, googleMapsUrl, facebookUrl };
+    for (const [key, value] of Object.entries(text)) {
+      if (value !== undefined) settings[key] = String(value).trim();
+    }
+
+    const messages = cleanList(welcomeMessages);
+    if (messages) settings.welcomeMessages = messages;
+
+    if (rankSettings) {
+      if (!settings.rankSettings) settings.rankSettings = {};
+      const target = settings.rankSettings;
+
+      const silver = rankSettings.silverMinPoints !== undefined
+        ? Number(rankSettings.silverMinPoints) : target.silverMinPoints;
+      const gold = rankSettings.goldMinPoints !== undefined
+        ? Number(rankSettings.goldMinPoints) : target.goldMinPoints;
+      const diamond = rankSettings.diamondMinPoints !== undefined
+        ? Number(rankSettings.diamondMinPoints) : target.diamondMinPoints;
+
+      if (![silver, gold, diamond].every((n) => Number.isFinite(n) && n >= 0)) {
+        return res.status(400).json({ message: 'Mốc điểm các hạng thẻ phải là số không âm' });
+      }
+      // Out-of-order thresholds would make a tier unreachable.
+      if (!(silver < gold && gold < diamond)) {
+        return res.status(400).json({
+          message: `Mốc điểm phải tăng dần: Bạc (${silver}) < Vàng (${gold}) < Kim Cương (${diamond})`,
+        });
+      }
+      target.silverMinPoints = silver;
+      target.goldMinPoints = gold;
+      target.diamondMinPoints = diamond;
+
+      for (const tier of ['bronze', 'silver', 'gold', 'diamond']) {
+        const benefits = cleanList(rankSettings[`${tier}Benefits`]);
+        if (benefits) target[`${tier}Benefits`] = benefits;
+      }
     }
 
     await settings.save();
     res.json(settings);
-  } catch (error) {
-    res.status(500).json({ message: error.message });
-  }
-});
-
-// Test Telegram connection
-router.post('/telegram-test', async (req, res) => {
-  try {
-    const settings = await Settings.findOne();
-    if (!settings?.telegramBotToken || !settings?.telegramChatId) {
-      return res.status(400).json({ message: 'Chưa cấu hình Telegram Bot Token và Chat ID' });
-    }
-
-    const url = `https://api.telegram.org/bot${settings.telegramBotToken}/sendMessage`;
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        chat_id: settings.telegramChatId,
-        text: `✅ <b>EM Beauty Nails & Makeup — Kết nối Telegram thành công!</b>\n\nHệ thống sẽ tự động thông báo khi có lịch hẹn mới.`,
-        parse_mode: 'HTML'
-      })
-    });
-
-    const data = await response.json();
-    if (data.ok) {
-      res.json({ success: true, message: 'Đã gửi tin nhắn thử nghiệm thành công!' });
-    } else {
-      res.status(400).json({ success: false, message: `Telegram API lỗi: ${data.description}` });
-    }
   } catch (error) {
     res.status(500).json({ message: error.message });
   }

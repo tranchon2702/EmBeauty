@@ -1,4 +1,5 @@
 import mongoose from 'mongoose';
+import bcrypt from 'bcryptjs';
 
 const employeeSchema = new mongoose.Schema({
   name: {
@@ -11,7 +12,11 @@ const employeeSchema = new mongoose.Schema({
   },
   pin: {
     type: String,
-    required: true // 4-digit code e.g. "1234"
+    required: true // 4-digit code, stored as bcrypt hash
+  },
+  mustChangePin: {
+    type: Boolean,
+    default: false // true when admin resets PIN → force change on next login
   },
   role: {
     type: String,
@@ -34,6 +39,23 @@ const employeeSchema = new mongoose.Schema({
 }, {
   timestamps: true
 });
+
+// ─── Pre-save: Auto-hash PIN when created or modified ─────────────────────────
+employeeSchema.pre('save', async function (next) {
+  if (!this.isModified('pin')) return next();
+  try {
+    const salt = await bcrypt.genSalt(10);
+    this.pin = await bcrypt.hash(this.pin, salt);
+    next();
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ─── Method: Compare raw PIN against stored hash ──────────────────────────────
+employeeSchema.methods.comparePin = async function (rawPin) {
+  return bcrypt.compare(rawPin, this.pin);
+};
 
 const Employee = mongoose.model('Employee', employeeSchema);
 export default Employee;

@@ -191,12 +191,13 @@ const Index = () => {
 
           {/* Secondary links */}
           {[
-            {
-              to: "/tick",
-              icon: <Star className="w-[17px] h-[17px] text-primary" />,
-              label: "Tích Điểm Thành Viên",
-              sub: "Tra cứu điểm tích lũy của bạn",
-            },
+            // ── LOYALTY POINTS DISABLED (tạm tắt menu Tích Điểm Thành Viên) ──
+            // {
+            //   to: "/tick",
+            //   icon: <Star className="w-[17px] h-[17px] text-primary" />,
+            //   label: "Tích Điểm Thành Viên",
+            //   sub: "Tra cứu điểm tích lũy của bạn",
+            // },
             {
               to: "/about",
               icon: <Receipt className="w-[17px] h-[17px] text-primary" />,

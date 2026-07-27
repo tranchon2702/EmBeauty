@@ -2,18 +2,38 @@
 <html lang="vi">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>EM Beauty - Nails &amp; Makeup Chuyên Nghiệp Cao Cấp</title>
-    <meta name="description" content="EM Beauty — Hệ thống Nails &amp; Makeup chăm sóc sắc đẹp chuyên nghiệp cao cấp. Đặt lịch nhanh chóng, kiểm tra tích điểm loyalty.">
+
+    <!-- Viewport: prevent user scaling for app-like feel -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+
+    <!-- PWA Meta -->
+    <meta name="theme-color" content="#9E5E6F" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="EM Beauty" />
+    <meta name="application-name" content="EM Beauty" />
+    <meta name="msapplication-TileColor" content="#9E5E6F" />
+
+    <title>EM Beauty - Nails &amp; Makeup Chuyên Nghiệp</title>
+    <meta name="description" content="EM Beauty — Nails &amp; Makeup chăm sóc sắc đẹp chuyên nghiệp. Đặt lịch nhanh, tra cứu điểm thành viên, xem bảng giá dịch vụ.">
     <meta name="author" content="EM Beauty" />
-    
+
+    <!-- iOS Icons -->
+    <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
+
+    <!-- Favicon -->
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+
     <!-- Preconnect for Google Fonts performance -->
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Great+Vibes&family=Outfit:wght@300;400;500;600;700&family=Playfair+Display:ital,wght@0,400;0,600;0,700;1,400&display=swap" rel="stylesheet">
-    
-    <!-- Favicon -->
-    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+
+    <!-- Safe area inset for iPhone notch / Dynamic Island -->
+    <style>
+      body { padding-top: env(safe-area-inset-top); padding-bottom: env(safe-area-inset-bottom); }
+    </style>
   </head>
 
   <body class="bg-[#FDFBF7] text-[#2F2E2C] antialiased">
@@ -21,3 +41,4 @@
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
+
