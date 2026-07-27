@@ -1,12 +1,11 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import {
-  ArrowLeft, Phone, Search, Trash2, Plus, Minus, QrCode,
-  CheckCircle2, Edit3, Receipt, StickyNote, BadgePlus
+  ArrowLeft, Trash2, Plus, Minus, QrCode,
+  CheckCircle2, Edit3, StickyNote
 } from "lucide-react";
 import { toast } from "sonner";
 import { API_BASE, authFetch } from "../config";
-import { StyledSelect } from "../components/StyledSelect";
 
 interface ServiceItem {
   _id: string;
@@ -81,6 +80,9 @@ const InvoiceCreate = () => {
   // UI
   const [activeCategory, setActiveCategory] = useState<string>("all");
   const [showPayModal, setShowPayModal] = useState(false);
+  // Qty editing (allow clear + retype, enforce min=1 on blur)
+  const [editingQtyIdx, setEditingQtyIdx] = useState<number | null>(null);
+  const [editingQtyVal, setEditingQtyVal] = useState<string>("");
 
   // ── Session check ─────────────────────────────────────────────────────────
   useEffect(() => {
@@ -251,10 +253,7 @@ const InvoiceCreate = () => {
   const handleSaveDraft = async () => {
     if (!selectedEmployee) { toast.warning("Chọn thợ làm dịch vụ"); return; }
     if (selectedServices.length === 0) { toast.warning("Thêm ít nhất 1 dịch vụ"); return; }
-    if (isNewCustomer && customerPhone && !customerName.trim()) {
-      toast.warning("Nhập tên khách hàng");
-      return;
-    }
+    // Customer validation removed (loyalty disabled)
 
     setLoading(true);
     try {
@@ -350,9 +349,10 @@ const InvoiceCreate = () => {
   const categories = ["all", ...Array.from(new Set([...dbCategories.map(c => c.key), ...dbServices.map(s => s.category)]))];
 
   return (
-    <div className="min-h-screen bg-[#FDFBF7] pb-20">
-      {/* ── Header ── */}
-      <div className="bg-[#9E5E6F] text-white py-4 px-5 flex items-center justify-between shadow-lg fixed top-0 left-0 right-0 z-30">
+    <div className="min-h-screen bg-[#F4EFEB]/40 pb-28">
+
+      {/* ── Fixed Header ── */}
+      <div className="bg-[#9E5E6F] text-white py-3.5 px-5 flex items-center justify-between shadow-lg fixed top-0 left-0 right-0 z-30">
         <div className="flex items-center gap-3">
           <Link to="/employee/dashboard" className="p-1.5 hover:bg-white/15 rounded-full transition">
             <ArrowLeft className="w-5 h-5" />
@@ -369,327 +369,266 @@ const InvoiceCreate = () => {
         )}
       </div>
 
-      <div className="max-w-5xl mx-auto px-4 mt-[73px] grid grid-cols-1 lg:grid-cols-5 gap-5">
+      <div className="pt-[57px]">
 
-        {/* ══ LEFT: Service picker ══════════════════════════════════════════ */}
-        <div className="lg:col-span-3 space-y-4">
-
-          {/* Customer lookup */}
-          <div className="bg-white rounded-2xl p-4 border border-stone-200/60 shadow-sm">
-            <p className="text-[10px] font-bold text-stone-400 uppercase tracking-wider mb-2.5">Thông Tin Khách Hàng</p>
-            <div className="flex gap-2">
-              <div className="relative flex-1">
-                <Phone className="w-3.5 h-3.5 text-stone-400 absolute left-3 top-1/2 -translate-y-1/2" />
-                <input
-                  type="tel"
-                  placeholder="Số điện thoại khách..."
-                  value={customerPhone}
-                  onChange={e => {
-                    const newPhone = e.target.value.replace(/\D/g, "");
-                    setCustomerPhone(newPhone);
-                    if (customerName || customerPoints !== null || isNewCustomer) {
-                      setCustomerName("");
-                      setCustomerPoints(null);
-                      setIsNewCustomer(false);
-                    }
-                  }}
-                  onKeyDown={e => e.key === "Enter" && handleCheckCustomer()}
-                  className="w-full pl-9 pr-3 py-2 bg-stone-50 border border-stone-200 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-[#9E5E6F]/30"
-                />
-              </div>
-              <button
-                onClick={handleCheckCustomer}
-                disabled={checkingCustomer}
-                className="px-3 py-2 bg-[#9E5E6F] hover:bg-[#8D5060] text-white text-xs font-semibold rounded-xl flex items-center gap-1.5 transition disabled:opacity-60"
-              >
-                <Search className="w-3.5 h-3.5" /> Tra cứu
-              </button>
-            </div>
-            {/* KH cũ — hiện info */}
-            {customerName && !isNewCustomer && (
-              <div className="mt-2.5 flex items-center justify-between bg-[#F9ECEF] rounded-xl px-3 py-2 text-xs animate-fade-in">
-                <div>
-                  <p className="text-[10px] text-stone-400">Thành viên</p>
-                  <p className="font-bold text-stone-800">{customerName}</p>
-                </div>
-                {/* ── LOYALTY POINTS DISABLED: điểm hiện tại ẩn tạm ──
-                {customerPoints !== null && (
-                  <div className="text-right">
-                    <p className="text-[10px] text-stone-400">Điểm hiện tại</p>
-                    <p className="font-bold text-[#9E5E6F] font-serif text-sm">{customerPoints} điểm</p>
-                  </div>
-                )}
-            ── END LOYALTY DISABLED ── */
-              </div>
-            )}
-
-            {/* KH mới — form nhập tên */}
-            {isNewCustomer && (
-              <div className="mt-2.5 space-y-2 animate-fade-in">
-                <div className="flex items-center gap-2 bg-emerald-50 rounded-xl px-3 py-2">
-                  <BadgePlus className="w-4 h-4 text-emerald-600 shrink-0" />
-                  <div className="flex-1">
-                    <p className="text-[10px] font-bold text-emerald-700">Khách hàng mới</p>
-                    <p className="text-[10px] text-emerald-600">Nhập tên để lưu thông tin khách hàng</p>
-                  </div>
-                </div>
-                <input
-                  type="text"
-                  placeholder="Tên khách hàng (VD: Nguyễn Thị Lan)"
-                  value={customerName}
-                  onChange={e => setCustomerName(e.target.value)}
-                  className="w-full px-3 py-2 bg-stone-50 border border-stone-200 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-emerald-400/30 placeholder:text-stone-300"
-                />
-              </div>
-            )}
-          </div>
-
-          {/* Service grid with category filter */}
-          <div className="bg-white rounded-2xl p-4 border border-stone-200/60 shadow-sm">
-            <div className="flex items-center gap-2 mb-3 overflow-x-auto pb-1 -mx-1 px-1">
-              {categories.map(cat => (
+        {/* ── Staff Selector (avatar chips) ── */}
+        <div className="bg-white border-b border-stone-100 px-4 py-3">
+          <p className="text-[10px] font-bold text-stone-400 uppercase tracking-wider mb-2.5">Thợ thực hiện *</p>
+          <div className="flex gap-3 overflow-x-auto no-scrollbar pb-0.5">
+            {employees.map((emp) => {
+              const isSelected = selectedEmployee === emp._id;
+              const initials = emp.name.split(" ").slice(-2).map((w: string) => w[0]).join("").toUpperCase();
+              return (
                 <button
-                  key={cat}
-                  onClick={() => setActiveCategory(cat)}
-                  className={`shrink-0 px-3 py-1.5 rounded-full text-[10px] font-bold border transition ${activeCategory === cat
-                    ? "bg-[#9E5E6F] border-[#9E5E6F] text-white"
-                    : "bg-stone-50 border-stone-200 text-stone-500 hover:border-stone-300"
-                    }`}
+                  key={emp._id}
+                  onClick={() => setSelectedEmployee(emp._id)}
+                  className={`flex flex-col items-center gap-1.5 shrink-0 transition-all duration-200 ${
+                    isSelected ? "scale-105" : "opacity-50"
+                  }`}
                 >
-                  {cat === "all" ? "🔖 Tất cả" : getCategoryLabel(cat)}
+                  <div className={`w-12 h-12 rounded-2xl flex items-center justify-center font-bold text-sm transition-all ${
+                    isSelected
+                      ? "bg-[#9E5E6F] text-white shadow-md shadow-[#9E5E6F]/30"
+                      : "bg-stone-100 text-stone-500"
+                  }`}>
+                    {initials}
+                  </div>
+                  <span className={`text-[10px] font-semibold max-w-[56px] truncate text-center ${
+                    isSelected ? "text-[#9E5E6F]" : "text-stone-400"
+                  }`}>
+                    {emp.name.split(" ").pop()}
+                  </span>
                 </button>
-              ))}
-            </div>
-
-            {filteredServices.length === 0 ? (
-              <p className="text-center text-xs text-stone-400 py-6 italic">Chưa có dịch vụ trong danh mục này</p>
-            ) : (
-              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-                {filteredServices.map(srv => (
-                  <button
-                    key={srv._id}
-                    onClick={() => addService(srv)}
-                    className="p-3 bg-stone-50 border border-stone-150 hover:bg-[#F9ECEF] hover:border-[#9E5E6F]/30 rounded-xl transition text-left flex flex-col gap-1 group"
-                  >
-                    <span className="text-[10px] text-stone-400 font-semibold">
-                      {getCategoryLabel(srv.category)}
-                    </span>
-                    <span className="text-[11px] font-semibold text-stone-750 line-clamp-2 leading-snug group-hover:text-[#9E5E6F] transition">
-                      {srv.name}
-                    </span>
-                    <span className="text-[#9E5E6F] font-bold font-serif text-xs mt-auto">
-                      {formatPrice(srv.price)}
-                    </span>
-                  </button>
-                ))}
-              </div>
-            )}
-
-            {/* Custom service */}
-            <div className="border-t border-stone-100 mt-3 pt-3">
-              <p className="text-[10px] font-bold text-stone-400 uppercase tracking-wider mb-2">Thêm dịch vụ / phụ thu tùy chỉnh</p>
-              <div className="flex gap-2">
-                <input
-                  type="text"
-                  placeholder="Tên dịch vụ..."
-                  value={customServiceName}
-                  onChange={e => setCustomServiceName(e.target.value)}
-                  className="flex-[2] px-3 py-2 bg-stone-50 border border-stone-200 rounded-xl text-xs focus:outline-none"
-                />
-                <input
-                  type="number"
-                  placeholder="Giá (đ)"
-                  value={customServicePrice}
-                  onChange={e => setCustomServicePrice(e.target.value)}
-                  className="flex-1 px-3 py-2 bg-stone-50 border border-stone-200 rounded-xl text-xs focus:outline-none"
-                />
-                <button
-                  onClick={addCustom}
-                  className="p-2.5 bg-[#9E5E6F]/10 hover:bg-[#9E5E6F]/20 border border-[#9E5E6F]/20 text-[#9E5E6F] rounded-xl transition"
-                >
-                  <Plus className="w-4 h-4" />
-                </button>
-              </div>
-            </div>
+              );
+            })}
           </div>
         </div>
 
-        {/* ══ RIGHT: Invoice summary ═══════════════════════════════════════ */}
-        <div className="lg:col-span-2 space-y-4">
-          <div className="bg-white rounded-2xl p-4 border border-stone-200/60 shadow-sm space-y-4">
+        {/* ── Category Tabs ── */}
+        <div className="bg-white border-b border-stone-100 px-3 py-2.5 flex gap-2 overflow-x-auto no-scrollbar">
+          {categories.map(cat => (
+            <button
+              key={cat}
+              onClick={() => setActiveCategory(cat)}
+              className={`shrink-0 px-3 py-1.5 rounded-full text-[10px] font-bold border transition ${
+                activeCategory === cat
+                  ? "bg-[#9E5E6F] border-[#9E5E6F] text-white"
+                  : "bg-stone-50 border-stone-200 text-stone-500"
+              }`}
+            >
+              {cat === "all" ? "🔖 Tất cả" : getCategoryLabel(cat)}
+            </button>
+          ))}
+        </div>
 
-            {/* Staff selector */}
-            <div>
-              <p className="text-[10px] font-bold text-stone-400 uppercase tracking-wider mb-1.5">Thợ thực hiện *</p>
-              <StyledSelect
-                value={selectedEmployee}
-                onChange={setSelectedEmployee}
-                placeholder="-- Chọn Thợ --"
-                size="md"
-                options={employees.map(e => ({
-                  value: e._id,
-                  label: `${e.name}${e.role === "admin" ? " (Quản lý)" : ""}`,
-                  icon: e.role === "admin" ? "👑" : "💇",
-                }))}
-              />
+        {/* ── Service Grid ── */}
+        <div className="px-4 pt-3 pb-2">
+          {filteredServices.length === 0 ? (
+            <p className="text-center text-xs text-stone-400 py-10 italic">Chưa có dịch vụ trong danh mục này</p>
+          ) : (
+            <div className="grid grid-cols-2 gap-2.5">
+              {filteredServices.map(srv => {
+                const isInCart = selectedServices.some(s => s.name === srv.name);
+                return (
+                  <button
+                    key={srv._id}
+                    onClick={() => addService(srv)}
+                    className={`p-3 border rounded-2xl text-left flex flex-col gap-1.5 active:scale-95 transition shadow-sm ${
+                      isInCart ? "bg-[#F9ECEF] border-[#9E5E6F]/40" : "bg-white border-stone-200"
+                    }`}
+                  >
+                    <span className="text-[10px] text-stone-400">{getCategoryLabel(srv.category)}</span>
+                    <span className="text-[11px] font-semibold text-stone-800 line-clamp-2 leading-snug">{srv.name}</span>
+                    <span className="text-[#9E5E6F] font-bold font-serif text-sm mt-auto">{formatPrice(srv.price)}</span>
+                    {isInCart && (
+                      <span className="text-[9px] font-bold text-[#9E5E6F] bg-[#9E5E6F]/10 rounded-full px-1.5 py-0.5 w-fit">
+                        ✓ Đã thêm
+                      </span>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
+        {/* ── Custom Service Adder ── */}
+        <div className="mx-4 mb-3 bg-white rounded-2xl p-3.5 border border-stone-200 shadow-sm">
+          <p className="text-[10px] font-bold text-stone-400 uppercase tracking-wider mb-2">+ Dịch vụ tùy chỉnh</p>
+          <div className="flex gap-2">
+            <input
+              type="text"
+              placeholder="Tên dịch vụ..."
+              value={customServiceName}
+              onChange={e => setCustomServiceName(e.target.value)}
+              onKeyDown={e => e.key === "Enter" && addCustom()}
+              className="flex-[2] px-3 py-2.5 bg-stone-50 border border-stone-200 rounded-xl text-xs focus:outline-none"
+            />
+            <input
+              type="number"
+              placeholder="Giá (đ)"
+              value={customServicePrice}
+              onChange={e => setCustomServicePrice(e.target.value)}
+              onKeyDown={e => e.key === "Enter" && addCustom()}
+              className="flex-1 min-w-0 px-3 py-2.5 bg-stone-50 border border-stone-200 rounded-xl text-xs focus:outline-none"
+            />
+            <button
+              onClick={addCustom}
+              className="p-2.5 bg-[#9E5E6F]/10 hover:bg-[#9E5E6F]/20 border border-[#9E5E6F]/20 text-[#9E5E6F] rounded-xl transition"
+            >
+              <Plus className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+
+        {/* ── Selected Services Cart ── */}
+        {selectedServices.length > 0 && (
+          <div className="mx-4 mb-4 bg-white rounded-2xl border border-stone-200 shadow-sm overflow-hidden">
+            {/* Cart header */}
+            <div className="px-4 py-2.5 bg-[#F9ECEF]/70 border-b border-stone-100 flex items-center justify-between">
+              <p className="text-[10px] font-bold text-[#9E5E6F] uppercase tracking-wider">
+                🛍️ Giỏ dịch vụ ({selectedServices.length})
+              </p>
+              <p className="text-[10px] text-stone-500">
+                Dịch vụ: <span className="font-bold text-stone-700">{formatPrice(subTotal)}</span>
+              </p>
             </div>
 
-            {/* Selected services list */}
-            <div>
-              <p className="text-[10px] font-bold text-stone-400 uppercase tracking-wider mb-2">Dịch vụ đã chọn</p>
-              {selectedServices.length === 0 ? (
-                <div className="py-5 text-center bg-stone-50 rounded-xl border border-dashed border-stone-200">
-                  <Receipt className="w-6 h-6 text-stone-300 mx-auto mb-1" />
-                  <p className="text-[10px] text-stone-400">Chọn dịch vụ từ bảng bên</p>
+            {/* Items */}
+            <div className="divide-y divide-stone-50">
+              {selectedServices.map((srv, idx) => (
+                <div key={idx} className="flex items-center gap-2 px-3 py-2.5">
+                  <div className="flex-1 min-w-0">
+                    <p className="text-xs font-semibold text-stone-800 truncate">{srv.name}</p>
+                    <p className="text-[10px] text-stone-400 font-serif">
+                      {formatPrice(srv.price)} × {editingQtyIdx === idx ? (editingQtyVal || "?") : srv.quantity}
+                      {" = "}<span className="text-[#9E5E6F] font-bold">{formatPrice(srv.price * srv.quantity)}</span>
+                    </p>
+                  </div>
+                  {/* Qty controls */}
+                  <div className="flex items-center gap-0.5 bg-stone-50 border border-stone-200 rounded-xl p-1 shrink-0">
+                    <button
+                      onClick={() => updateQty(idx, -1)}
+                      className="p-1.5 text-stone-500 hover:text-stone-800 rounded-lg active:scale-90 transition"
+                    >
+                      <Minus className="w-3 h-3" />
+                    </button>
+                    <input
+                      type="number"
+                      value={editingQtyIdx === idx ? editingQtyVal : String(srv.quantity)}
+                      onFocus={() => { setEditingQtyIdx(idx); setEditingQtyVal(String(srv.quantity)); }}
+                      onChange={e => setEditingQtyVal(e.target.value)}
+                      onBlur={() => {
+                        const n = parseInt(editingQtyVal, 10);
+                        setExactQty(idx, isNaN(n) || n < 1 ? 1 : n);
+                        setEditingQtyIdx(null);
+                        setEditingQtyVal("");
+                      }}
+                      className="w-10 text-center font-bold text-stone-800 text-xs bg-white rounded-lg border border-stone-200 focus:border-[#9E5E6F] focus:outline-none py-1"
+                    />
+                    <button
+                      onClick={() => updateQty(idx, 1)}
+                      className="p-1.5 text-stone-500 hover:text-stone-800 rounded-lg active:scale-90 transition"
+                    >
+                      <Plus className="w-3 h-3" />
+                    </button>
+                  </div>
+                  <button
+                    onClick={() => removeService(idx)}
+                    className="p-1.5 text-stone-300 hover:text-red-500 transition shrink-0 active:scale-90"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
                 </div>
-              ) : (
-                <div className="space-y-1.5 max-h-52 overflow-y-auto pr-0.5">
-                  {selectedServices.map((srv, idx) => (
-                    <div key={idx} className="flex items-center gap-2 bg-[#FDFBF7] border border-stone-150 rounded-xl px-2.5 py-2 text-[11px]">
-                      <div className="flex-1 min-w-0">
-                        <p className="font-semibold text-stone-800 truncate">{srv.name}</p>
-                        <p className="text-stone-400 font-serif">{formatPrice(srv.price)} × {srv.quantity} = <span className="text-[#9E5E6F] font-bold">{formatPrice(srv.price * srv.quantity)}</span></p>
-                      </div>
-                      <div className="flex items-center gap-0.5 bg-white border border-stone-200 rounded-lg p-0.5 shrink-0">
-                        <button onClick={() => updateQty(idx, -1)} className="p-1 hover:bg-stone-50 text-stone-500 rounded transition"><Minus className="w-3 h-3" /></button>
-                        <input
-                          type="number"
-                          min={1}
-                          value={srv.quantity}
-                          onChange={e => setExactQty(idx, parseInt(e.target.value, 10) || 1)}
-                          className="w-9 text-center font-bold text-stone-800 text-xs bg-stone-50 rounded border border-stone-200 focus:border-[#9E5E6F] focus:outline-none py-0.5"
-                        />
-                        <button onClick={() => updateQty(idx, 1)} className="p-1 hover:bg-stone-50 text-stone-500 rounded transition"><Plus className="w-3 h-3" /></button>
-                      </div>
-                      <button onClick={() => removeService(idx)} className="p-1 text-stone-300 hover:text-red-500 transition shrink-0">
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              )}
+              ))}
             </div>
 
-            {/* Surcharge + Discount + Note */}
-            <div className="space-y-2.5 pt-3 border-t border-stone-100 text-xs">
-              <div className="flex items-center justify-between gap-2">
-                <span className="text-stone-500 shrink-0">Dịch vụ:</span>
-                <span className="font-bold text-stone-750 font-serif">{formatPrice(subTotal)}</span>
-              </div>
-
-              <div className="flex items-center justify-between gap-2">
-                <label className="text-stone-500 shrink-0">Phụ thu:</label>
+            {/* Surcharge / Discount / Note */}
+            <div className="px-4 py-3 border-t border-stone-100 space-y-2.5 bg-stone-50/50">
+              <div className="flex items-center gap-3">
+                <label className="text-[11px] text-stone-500 w-20 shrink-0">Phụ thu:</label>
                 <input
                   type="number" min={0}
                   value={surcharge || ""}
-                  placeholder="0đ"
+                  placeholder="0"
                   onChange={e => setSurcharge(Number(e.target.value))}
-                  className="w-28 text-right bg-stone-50 border border-stone-200 rounded-lg px-2 py-1 text-xs font-semibold focus:outline-none focus:ring-1 focus:ring-[#9E5E6F]"
+                  className="flex-1 text-right bg-white border border-stone-200 rounded-xl px-3 py-2 text-xs font-semibold focus:outline-none focus:ring-1 focus:ring-[#9E5E6F]"
                 />
+                <span className="text-[11px] text-stone-400 shrink-0">đ</span>
               </div>
-
               {surcharge > 0 && (
-                <div className="flex items-center gap-2">
-                  <StickyNote className="w-3 h-3 text-stone-400 shrink-0" />
-                  <input
-                    type="text"
-                    placeholder="Lý do phụ thu (vẽ nhũ, đính đá...)"
-                    value={surchargeNote}
-                    onChange={e => setSurchargeNote(e.target.value)}
-                    className="flex-1 bg-stone-50 border border-stone-200 rounded-lg px-2 py-1 text-[10px] focus:outline-none"
-                  />
-                </div>
+                <input
+                  type="text"
+                  placeholder="Lý do phụ thu (vẽ nhũ, đính đá...)"
+                  value={surchargeNote}
+                  onChange={e => setSurchargeNote(e.target.value)}
+                  className="w-full bg-white border border-stone-200 rounded-xl px-3 py-2 text-xs focus:outline-none"
+                />
               )}
-
-              <div className="flex items-center justify-between gap-2">
-                <label className="text-stone-500 shrink-0">Giảm giá:</label>
+              <div className="flex items-center gap-3">
+                <label className="text-[11px] text-stone-500 w-20 shrink-0">Giảm giá:</label>
                 <input
                   type="number" min={0}
                   value={discount || ""}
-                  placeholder="0đ"
+                  placeholder="0"
                   onChange={e => setDiscount(Number(e.target.value))}
-                  className="w-28 text-right bg-stone-50 border border-stone-200 rounded-lg px-2 py-1 text-xs font-semibold focus:outline-none focus:ring-1 focus:ring-[#9E5E6F]"
+                  className="flex-1 text-right bg-white border border-stone-200 rounded-xl px-3 py-2 text-xs font-semibold focus:outline-none focus:ring-1 focus:ring-[#9E5E6F]"
                 />
+                <span className="text-[11px] text-stone-400 shrink-0">đ</span>
               </div>
-
               <div className="flex items-center gap-2">
-                <StickyNote className="w-3 h-3 text-stone-400 shrink-0" />
+                <StickyNote className="w-3.5 h-3.5 text-stone-400 shrink-0" />
                 <input
                   type="text"
                   placeholder="Ghi chú hóa đơn..."
                   value={invoiceNote}
                   onChange={e => setInvoiceNote(e.target.value)}
-                  className="flex-1 bg-stone-50 border border-stone-200 rounded-lg px-2 py-1 text-[10px] focus:outline-none"
+                  className="flex-1 bg-white border border-stone-200 rounded-xl px-3 py-2 text-xs focus:outline-none"
                 />
               </div>
-
-              {/* Total */}
-              <div className="flex items-baseline justify-between pt-2 border-t border-stone-150">
-                <span className="font-bold text-stone-800 text-sm">Tổng thanh toán:</span>
-                <span className="text-2xl font-extrabold text-[#9E5E6F] font-serif leading-none">{formatPrice(totalAmount)}</span>
-              </div>
             </div>
-
-            {/* Payment method */}
-            <div>
-              <p className="text-[10px] font-bold text-stone-400 uppercase tracking-wider mb-2">Hình thức thanh toán</p>
-              <div className="flex gap-2">
-                {(["cash", "bank"] as const).map(m => (
-                  <button
-                    key={m}
-                    onClick={() => setPaymentMethod(m)}
-                    className={`flex-1 py-2 rounded-xl text-xs font-bold border transition ${paymentMethod === m ? "bg-[#9E5E6F] border-[#9E5E6F] text-white" : "bg-white border-stone-200 text-stone-600 hover:bg-stone-50"}`}
-                  >
-                    {m === "cash" ? "💵 Tiền mặt" : "📱 Chuyển khoản"}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* Bank selector (when bank payment selected) */}
-            {paymentMethod === "bank" && bankAccounts.length > 0 && (
-              <div className="animate-fade-in">
-                <p className="text-[10px] font-bold text-stone-400 uppercase tracking-wider mb-1.5">Chọn tài khoản QR *</p>
-                <div className="space-y-1.5">
-                  {bankAccounts.map(bank => (
-                    <button
-                      key={bank._id}
-                      onClick={() => setSelectedBankId(bank._id)}
-                      className={`w-full flex items-center gap-3 p-2.5 rounded-xl border text-left transition ${selectedBankId === bank._id ? "bg-[#F9ECEF] border-[#9E5E6F]/40" : "bg-stone-50 border-stone-200 hover:bg-stone-100"}`}
-                    >
-                      <div className={`w-2 h-2 rounded-full shrink-0 ${selectedBankId === bank._id ? "bg-[#9E5E6F]" : "bg-stone-300"}`} />
-                      <div className="flex-1 min-w-0">
-                        <p className="text-xs font-bold text-stone-800">{bank.displayName}</p>
-                        <p className="text-[10px] text-stone-400">{bank.accountNumber} — {bank.accountHolder}</p>
-                      </div>
-                      {selectedBankId === bank._id && <QrCode className="w-4 h-4 text-[#9E5E6F] shrink-0" />}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {/* Create / Update invoice button */}
-            <button
-              onClick={handleSaveDraft}
-              disabled={loading || selectedServices.length === 0}
-              className={`w-full py-3 ${paymentMethod === "cash" ? "bg-emerald-600 hover:bg-emerald-700" : "bg-[#9E5E6F] hover:bg-[#8D5060]"} disabled:bg-stone-300 text-white font-bold rounded-xl text-xs transition uppercase tracking-wider flex items-center justify-center gap-2 shadow-md`}
-            >
-              {loading ? "Đang xử lý..." : (
-                <>
-                  {paymentMethod === "cash" ? (
-                    <><CheckCircle2 className="w-4 h-4" /> {invoiceStatus === "draft" ? "Cập nhật & Thanh toán" : "Lưu & Thanh toán tiền mặt"}</>
-                  ) : (
-                    <><QrCode className="w-4 h-4" /> {invoiceStatus === "draft" ? "Cập nhật & Chọn QR" : "Tạo hóa đơn & Chọn QR"}</>
-                  )}
-                </>
-              )}
-            </button>
           </div>
+        )}
+
+        {/* ── CUSTOMER SECTION DISABLED (loyalty tạm tắt) ──
+        <div className="bg-white rounded-2xl p-4 border border-stone-200/60 shadow-sm">
+          ... customer phone lookup + new customer form ...
         </div>
+        */}
+
       </div>
 
-      {/* ══ Payment / QR Modal ══════════════════════════════════════════════ */}
+      {/* ── Sticky Bottom Bar ── */}
+      <div
+        className="fixed bottom-0 left-0 right-0 z-30 bg-white/95 backdrop-blur-sm border-t border-stone-200 px-4 flex items-center gap-3 shadow-[0_-4px_16px_rgba(0,0,0,0.08)]"
+        style={{ paddingTop: "12px", paddingBottom: "calc(12px + env(safe-area-inset-bottom))" }}
+      >
+        <div className="flex-1 min-w-0">
+          {selectedServices.length === 0 ? (
+            <p className="text-xs text-stone-400 italic">Chọn dịch vụ để bắt đầu...</p>
+          ) : (
+            <>
+              <p className="text-[10px] text-stone-400">
+                {selectedServices.length} dịch vụ{invoiceStatus === "draft" ? " · Bản nháp" : ""}
+              </p>
+              <p className="text-xl font-extrabold text-[#9E5E6F] font-serif leading-none">{formatPrice(totalAmount)}</p>
+            </>
+          )}
+        </div>
+        <button
+          onClick={handleSaveDraft}
+          disabled={loading || selectedServices.length === 0}
+          className="px-5 py-3 bg-[#9E5E6F] hover:bg-[#8D5060] text-white font-bold text-sm rounded-2xl disabled:bg-stone-300 disabled:shadow-none transition active:scale-95 shadow-lg shadow-[#9E5E6F]/30 flex items-center gap-2 shrink-0"
+        >
+          {loading ? (
+            <div className="w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin" />
+          ) : (
+            <><CheckCircle2 className="w-4 h-4" /> {invoiceStatus === "draft" ? "Cập nhật" : "Thanh Toán"}</>
+          )}
+        </button>
+      </div>
+
+      {/* ── Payment / QR Modal ── */}
       {showPayModal && (
         <div className="fixed inset-0 bg-stone-900/65 backdrop-blur-sm flex items-end sm:items-center justify-center p-4 z-50">
           <div className="bg-white rounded-3xl w-full max-w-sm border border-stone-100 shadow-2xl overflow-hidden">
@@ -729,44 +668,41 @@ const InvoiceCreate = () => {
                 </div>
               </div>
 
-              {/* Payment method tabs within modal */}
+              {/* Payment method tabs */}
               <div className="flex gap-2">
                 {(["cash", "bank"] as const).map(m => (
                   <button
                     key={m}
                     onClick={() => setPaymentMethod(m)}
-                    className={`flex-1 py-2 rounded-xl text-xs font-bold border transition ${paymentMethod === m ? "bg-[#9E5E6F] border-[#9E5E6F] text-white" : "bg-stone-50 border-stone-200 text-stone-600"}`}
+                    className={`flex-1 py-2.5 rounded-xl text-xs font-bold border transition ${
+                      paymentMethod === m ? "bg-[#9E5E6F] border-[#9E5E6F] text-white" : "bg-stone-50 border-stone-200 text-stone-600"
+                    }`}
                   >
                     {m === "cash" ? "💵 Tiền mặt" : "📱 Chuyển khoản"}
                   </button>
                 ))}
               </div>
 
-              {/* QR display for bank */}
+              {/* QR for bank */}
               {paymentMethod === "bank" && (
                 <div className="animate-fade-in space-y-3">
-                  {/* Bank selector */}
-                  <div className="flex gap-1.5 overflow-x-auto pb-1">
+                  <div className="flex gap-1.5 overflow-x-auto pb-1 no-scrollbar">
                     {bankAccounts.map(bank => (
                       <button
                         key={bank._id}
                         onClick={() => setSelectedBankId(bank._id)}
-                        className={`shrink-0 px-3 py-1.5 rounded-full text-[10px] font-bold border transition ${selectedBankId === bank._id ? "bg-[#9E5E6F] border-[#9E5E6F] text-white" : "bg-stone-50 border-stone-200 text-stone-600"}`}
+                        className={`shrink-0 px-3 py-1.5 rounded-full text-[10px] font-bold border transition ${
+                          selectedBankId === bank._id ? "bg-[#9E5E6F] border-[#9E5E6F] text-white" : "bg-stone-50 border-stone-200 text-stone-600"
+                        }`}
                       >
                         {bank.displayName}
                       </button>
                     ))}
                   </div>
-
-                  {/* QR image */}
                   {selectedBankId && (
                     <div className="flex flex-col items-center gap-2">
                       <div className="bg-white border-2 border-stone-100 rounded-2xl p-3 shadow-inner">
-                        <img
-                          src={getQRUrl()}
-                          alt="VietQR"
-                          className="w-52 h-52 object-contain rounded-lg"
-                        />
+                        <img src={getQRUrl()} alt="VietQR" className="w-52 h-52 object-contain rounded-lg" />
                       </div>
                       <div className="text-center text-[10px] text-stone-500">
                         <p className="font-bold text-stone-700">{getSelectedBank()?.displayName}</p>
@@ -780,7 +716,7 @@ const InvoiceCreate = () => {
 
               {/* Cash instruction */}
               {paymentMethod === "cash" && (
-                <div className="bg-green-50 border border-green-200 rounded-xl p-3 text-center text-xs text-green-700 font-semibold animate-fade-in">
+                <div className="bg-green-50 border border-green-200 rounded-xl p-3 text-center text-xs text-green-700 font-semibold">
                   💵 Thu <strong>{formatPrice(totalAmount)}</strong> tiền mặt từ khách
                 </div>
               )}

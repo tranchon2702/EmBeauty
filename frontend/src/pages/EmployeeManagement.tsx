@@ -932,128 +932,17 @@ const EmployeeManagement = () => {
                     </div>
                   </div>
 
-                  {/* Loyalty Points */}
+                  {/* ── LOYALTY POINTS DISABLED (tạm tắt) ──
                   <div className="bg-white rounded-2xl p-5 border border-stone-200/60 shadow-sm">
-                    <h2 className="text-xs font-bold text-stone-400 uppercase tracking-wider mb-4 flex items-center gap-1.5">
-                      <Percent className="w-3.5 h-3.5 text-primary" /> Tích điểm thành viên
-                    </h2>
-                    <div className="flex items-center gap-3 text-xs">
-                      <input type="number" min={0} max={100} value={settings.pointRewardRate}
-                        onChange={e => setSettings(s => ({ ...s, pointRewardRate: Number(e.target.value) }))}
-                        className="w-20 px-3 py-2 bg-stone-50 border border-stone-200 rounded-xl text-center font-bold focus:outline-none" />
-                      <p className="text-stone-500">
-                        Mức tích điểm
-                        <br />
-                        <span className="text-[10px] text-stone-400">
-                          Với mức {settings.pointRewardRate || 0}: hóa đơn 200.000đ ={" "}
-                          <strong className="text-[#9E5E6F]">
-                            {Math.floor((200000 * (settings.pointRewardRate || 0)) / 100000)} điểm
-                          </strong>
-                        </span>
-                      </p>
-                    </div>
+                    <h2 ...> <Percent /> Tích điểm thành viên </h2>
+                    ... (point reward rate input) ...
                   </div>
 
-                  {/* Loyalty tiers: thresholds + the benefits shown on the
-                      customer's membership card at /tick */}
                   <div className="bg-white rounded-2xl p-5 border border-stone-200/60 shadow-sm space-y-4">
-                    <h2 className="text-xs font-bold text-stone-400 uppercase tracking-wider flex items-center gap-1.5">
-                      <Gift className="w-3.5 h-3.5 text-[#9E5E6F]" /> Hạng thẻ thành viên
-                    </h2>
-                    <p className="text-[10px] text-stone-400 leading-relaxed">
-                      Mốc điểm và quyền lợi bên dưới hiển thị trực tiếp trên thẻ thành viên của khách
-                      tại trang <span className="font-mono text-stone-500">/tick</span>.
-                      Hạng tính theo <strong>tổng điểm tích lũy trọn đời</strong> nên khách không bị tụt hạng.
-                    </p>
-
-                    {/* Thresholds */}
-                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
-                      {([
-                        { key: "silverMinPoints", label: "Mốc Bạc", icon: "🥈", tone: "bg-slate-50 border-slate-200/60 text-slate-700" },
-                        { key: "goldMinPoints", label: "Mốc Vàng", icon: "🥇", tone: "bg-amber-50 border-amber-200/60 text-amber-800" },
-                        { key: "diamondMinPoints", label: "Mốc Kim Cương", icon: "💎", tone: "bg-cyan-50 border-cyan-200/60 text-cyan-800" },
-                      ] as const).map(field => (
-                        <div key={field.key} className={`border rounded-xl p-3 ${field.tone}`}>
-                          <label className="text-[10px] font-bold block mb-1">
-                            {field.icon} {field.label}
-                          </label>
-                          <div className="flex items-center gap-1">
-                            <input
-                              type="number"
-                              min={0}
-                              value={settings.rankSettings[field.key]}
-                              onChange={e => patchRank({ [field.key]: Number(e.target.value) || 0 } as Partial<RankSettings>)}
-                              className="w-full px-2.5 py-1.5 bg-white border border-stone-200 rounded-lg text-center font-bold text-stone-800 focus:outline-none"
-                            />
-                            <span className="text-[10px] font-semibold text-stone-400">điểm</span>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-
-                    {!(settings.rankSettings.silverMinPoints < settings.rankSettings.goldMinPoints
-                      && settings.rankSettings.goldMinPoints < settings.rankSettings.diamondMinPoints) && (
-                      <p className="text-[10px] font-bold text-red-600 bg-red-50 border border-red-200 rounded-xl px-3 py-2">
-                        Mốc điểm phải tăng dần: Bạc &lt; Vàng &lt; Kim Cương — nếu không sẽ có hạng không bao giờ đạt được.
-                      </p>
-                    )}
-
-                    {/* Benefits per tier */}
-                    <div className="space-y-3 pt-1">
-                      <p className="text-[10px] font-bold text-stone-400 uppercase tracking-wider">
-                        Quyền lợi từng hạng
-                      </p>
-                      {RANK_TIERS.map(tier => {
-                        const list = settings.rankSettings[benefitsKey(tier.key)] as string[];
-                        return (
-                          <div key={tier.key} className={`rounded-xl border p-3 space-y-2 ${tier.tone}`}>
-                            <p className="text-[11px] font-bold flex items-center gap-1.5">
-                              <span>{tier.icon}</span> Hạng {tier.label}
-                              <span className="opacity-60 font-semibold">({list.length} quyền lợi)</span>
-                            </p>
-
-                            {list.length > 0 && (
-                              <div className="space-y-1">
-                                {list.map((benefit, i) => (
-                                  <div key={i} className="flex items-start gap-2 bg-white/70 rounded-lg px-2.5 py-1.5">
-                                    <p className="flex-1 text-[11px] text-stone-700 leading-snug">{benefit}</p>
-                                    <button
-                                      type="button"
-                                      onClick={() => removeBenefit(tier.key, i)}
-                                      className="p-0.5 text-stone-300 hover:text-red-500 transition shrink-0"
-                                      title="Xóa quyền lợi"
-                                    >
-                                      <X className="w-3.5 h-3.5" />
-                                    </button>
-                                  </div>
-                                ))}
-                              </div>
-                            )}
-
-                            <div className="flex gap-1.5">
-                              <input
-                                type="text"
-                                placeholder="Thêm quyền lợi..."
-                                value={newBenefit[tier.key] || ""}
-                                onChange={e => setNewBenefit(b => ({ ...b, [tier.key]: e.target.value }))}
-                                onKeyDown={e => {
-                                  if (e.key === "Enter") { e.preventDefault(); addBenefit(tier.key); }
-                                }}
-                                className="flex-1 px-2.5 py-1.5 bg-white border border-stone-200 rounded-lg text-[11px] text-stone-800 focus:outline-none focus:border-[#9E5E6F]"
-                              />
-                              <button
-                                type="button"
-                                onClick={() => addBenefit(tier.key)}
-                                className="px-2.5 py-1.5 bg-white hover:bg-[#9E5E6F] hover:text-white border border-stone-200 rounded-lg transition shrink-0"
-                              >
-                                <Plus className="w-3.5 h-3.5" />
-                              </button>
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
+                    <h2 ...> <Gift /> Hạng thẻ thành viên </h2>
+                    ... (rank tiers thresholds + benefits) ...
                   </div>
+                  ── END LOYALTY DISABLED ── */}
 
                   {/* Welcome Messages (Gen-Z vibes for homepage) */}
                   <div className="bg-white rounded-2xl p-5 border border-stone-200/60 shadow-sm">
