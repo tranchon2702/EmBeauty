@@ -17,6 +17,18 @@ const MAX_PAGE_SIZE = 200;
 const isValidId = (id) => mongoose.Types.ObjectId.isValid(id);
 const oid = (id) => new mongoose.Types.ObjectId(id);
 
+const normalizeEmployeeIds = (employeeIds, employeeId) => {
+  const candidates = Array.isArray(employeeIds) && employeeIds.length > 0
+    ? employeeIds
+    : [employeeId];
+  return [...new Set(candidates.map((id) => String(id || '')).filter(isValidId))];
+};
+
+const employeeMatch = (employeeId) => {
+  const id = oid(employeeId);
+  return { $or: [{ employeeId: id }, { employeeIds: id }] };
+};
+
 /**
  * Staff only ever see invoices they rang up or performed; admins see everything.
  * `createdBy` is absent on invoices written before it existed, hence the $or.
@@ -24,13 +36,14 @@ const oid = (id) => new mongoose.Types.ObjectId(id);
 const visibilityFilter = (req) => {
   if (isAdmin(req)) return {};
   const me = oid(req.user.id);
-  return { $or: [{ createdBy: me }, { employeeId: me }] };
+  return { $or: [{ createdBy: me }, { employeeId: me }, { employeeIds: me }] };
 };
 
 const canModify = (req, invoice) =>
   isAdmin(req) ||
   invoice.createdBy?.toString() === req.user.id ||
-  invoice.employeeId?.toString() === req.user.id;
+  invoice.employeeId?.toString() === req.user.id ||
+  invoice.employeeIds?.some((id) => id.toString() === req.user.id);
 
 /**
  * Sequential per-day number: HD-20260726-0001.
@@ -50,6 +63,7 @@ const nextInvoiceNumber = async () => {
 
 const POPULATE_LIST = [
   { path: 'employeeId', select: 'name avatar' },
+  { path: 'employeeIds', select: 'name avatar' },
   { path: 'bankAccountId', select: 'bankName accountNumber displayName' },
 ];
 
@@ -57,12 +71,13 @@ const POPULATE_LIST = [
 // Money is always derived from the line items — see lib/invoiceTotals.js.
 router.post('/', async (req, res) => {
   const {
-    customerPhone, customerName, employeeId, services,
+    customerPhone, customerName, employeeId, employeeIds, services,
     discount, surcharge, surchargeNote, paymentMethod, bankAccountId, note,
   } = req.body;
 
-  if (!employeeId || !isValidId(employeeId)) {
-    return res.status(400).json({ message: 'Vui lòng chọn thợ thực hiện' });
+  const workers = normalizeEmployeeIds(employeeIds, employeeId);
+  if (workers.length === 0) {
+    return res.status(400).json({ message: 'Vui lòng chọn ít nhất một thợ thực hiện' });
   }
 
   let totals;
@@ -75,7 +90,8 @@ router.post('/', async (req, res) => {
   const base = {
     customerPhone: (customerPhone || '').trim(),
     customerName: (customerName || '').trim(),
-    employeeId,
+    employeeId: workers[0],
+    employeeIds: workers,
     createdBy: req.user.id,
     ...totals,
     surchargeNote: (surchargeNote || '').trim(),
@@ -109,7 +125,7 @@ router.put('/:id', async (req, res) => {
 
   const {
     services, discount, surcharge, surchargeNote,
-    paymentMethod, bankAccountId, note, customerPhone, customerName, employeeId,
+    paymentMethod, bankAccountId, note, customerPhone, customerName, employeeId, employeeIds,
   } = req.body;
 
   try {
@@ -138,7 +154,14 @@ router.put('/:id', async (req, res) => {
     }
     Object.assign(invoice, totals);
 
-    if (employeeId !== undefined && isValidId(employeeId)) invoice.employeeId = employeeId;
+    if (employeeIds !== undefined || employeeId !== undefined) {
+      const workers = normalizeEmployeeIds(employeeIds, employeeId);
+      if (workers.length === 0) {
+        return res.status(400).json({ message: 'Vui lòng chọn ít nhất một thợ thực hiện' });
+      }
+      invoice.employeeId = workers[0];
+      invoice.employeeIds = workers;
+    }
     if (surchargeNote !== undefined) invoice.surchargeNote = String(surchargeNote).trim();
     if (note !== undefined) invoice.note = String(note).trim();
     if (customerPhone !== undefined) invoice.customerPhone = String(customerPhone).trim();
@@ -268,17 +291,36 @@ router.patch('/:id/cancel', async (req, res) => {
   }
 });
 
+// ─── DELETE INVOICE (OWNER ONLY) ─────────────────────────────────────────────
+// Hard deletion is intentionally reserved for admins because the owner uses it
+// to remove a wrongly-entered bill before staff create the corrected bill.
+router.delete('/:id', async (req, res) => {
+  const { id } = req.params;
+  if (!isValidId(id)) return res.status(400).json({ message: 'Mã hóa đơn không hợp lệ' });
+  if (!isAdmin(req)) {
+    return res.status(403).json({ message: 'Chỉ chủ tiệm mới có quyền xóa hóa đơn' });
+  }
+
+  try {
+    const invoice = await Invoice.findByIdAndDelete(id);
+    if (!invoice) return res.status(404).json({ message: 'Hóa đơn không tồn tại' });
+    res.json({ message: `Đã xóa hóa đơn ${invoice.invoiceNumber}` });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
 // ─── GET INVOICES LIST ───────────────────────────────────────────────────────
 // Returns { items, total } — `total` lets the UI say "hiển thị 200/634" instead
 // of silently truncating a busy month's report.
 router.get('/', async (req, res) => {
   try {
     const { status, employeeId, date, dateFrom, dateTo, paymentMethod } = req.query;
-    const filter = { ...visibilityFilter(req) };
+    const clauses = [visibilityFilter(req)];
 
-    if (status) filter.status = status;
-    if (paymentMethod) filter.paymentMethod = paymentMethod;
-    if (employeeId && isValidId(employeeId)) filter.employeeId = oid(employeeId);
+    if (status) clauses.push({ status });
+    if (paymentMethod) clauses.push({ paymentMethod });
+    if (employeeId && isValidId(employeeId)) clauses.push(employeeMatch(employeeId));
 
     const from = vnStartOfDay(date || dateFrom);
     const to = vnEndOfDay(date || dateTo || dateFrom);
@@ -288,8 +330,11 @@ router.get('/', async (req, res) => {
       if (to) range.$lte = to;
       // Settled invoices belong to the day the money came in; anything still
       // open belongs to the day it was written.
-      filter.$and = [{ $or: [{ paidAt: range }, { paidAt: null, createdAt: range }] }];
+      clauses.push({ $or: [{ paidAt: range }, { paidAt: null, createdAt: range }] });
     }
+
+    const activeClauses = clauses.filter((clause) => Object.keys(clause).length > 0);
+    const filter = activeClauses.length > 1 ? { $and: activeClauses } : (activeClauses[0] || {});
 
     const limit = Math.min(MAX_PAGE_SIZE, Math.max(1, parseInt(req.query.limit, 10) || MAX_PAGE_SIZE));
     const skip = Math.max(0, parseInt(req.query.skip, 10) || 0);
@@ -315,12 +360,13 @@ router.get('/stats/summary', async (req, res) => {
     const from = vnStartOfDay(req.query.dateFrom || today);
     const to = vnEndOfDay(req.query.dateTo || req.query.dateFrom || today);
 
-    const scope = visibilityFilter(req);
-    const extra = {};
-    if (employeeId && isValidId(employeeId)) extra.employeeId = oid(employeeId);
-    if (paymentMethod) extra.paymentMethod = paymentMethod;
+    const commonClauses = [visibilityFilter(req)];
+    if (employeeId && isValidId(employeeId)) commonClauses.push(employeeMatch(employeeId));
+    if (paymentMethod) commonClauses.push({ paymentMethod });
 
-    const paidMatch = { ...scope, ...extra, status: 'paid', paidAt: { $gte: from, $lte: to } };
+    const paidMatch = {
+      $and: [...commonClauses, { status: 'paid', paidAt: { $gte: from, $lte: to } }],
+    };
 
     const sumIf = (method) => ({
       $sum: { $cond: [{ $eq: ['$paymentMethod', method] }, '$totalAmount', 0] },
@@ -343,8 +389,20 @@ router.get('/stats/summary', async (req, res) => {
           }],
           byEmployee: [
             {
+              $set: {
+                effectiveEmployeeIds: {
+                  $cond: [
+                    { $gt: [{ $size: { $ifNull: ['$employeeIds', []] } }, 0] },
+                    '$employeeIds',
+                    ['$employeeId'],
+                  ],
+                },
+              },
+            },
+            { $unwind: '$effectiveEmployeeIds' },
+            {
               $group: {
-                _id: '$employeeId',
+                _id: '$effectiveEmployeeIds',
                 amount: { $sum: '$totalAmount' },
                 cash: sumIf('cash'),
                 bank: sumIf('bank'),
@@ -394,10 +452,13 @@ router.get('/stats/summary', async (req, res) => {
     };
 
     // Unsettled invoices have no paidAt, so they are counted by creation date.
-    const openRange = { ...scope, createdAt: { $gte: from, $lte: to } };
     const [draftCount, cancelledCount] = await Promise.all([
-      Invoice.countDocuments({ ...openRange, status: 'draft' }),
-      Invoice.countDocuments({ ...openRange, status: 'cancelled' }),
+      Invoice.countDocuments({
+        $and: [...commonClauses, { status: 'draft', createdAt: { $gte: from, $lte: to } }],
+      }),
+      Invoice.countDocuments({
+        $and: [...commonClauses, { status: 'cancelled', createdAt: { $gte: from, $lte: to } }],
+      }),
     ]);
 
     res.json({
@@ -425,6 +486,7 @@ router.get('/:id', async (req, res) => {
   try {
     const invoice = await Invoice.findOne({ _id: id, ...visibilityFilter(req) })
       .populate('employeeId', 'name avatar')
+      .populate('employeeIds', 'name avatar')
       .populate('bankAccountId', 'bankName accountNumber accountHolder bankId displayName qrImageBase64');
     if (!invoice) return res.status(404).json({ message: 'Hóa đơn không tồn tại' });
     res.json(invoice);

@@ -15,8 +15,13 @@ const toVnParts = (date: Date) => {
   };
 };
 
-const format = (year: number, month: number, day: number) =>
-  `${year}-${pad(month + 1)}-${pad(day)}`;
+const format = (year: number, month: number, day: number) => {
+  // Date.UTC deliberately normalizes overflow/underflow, e.g. day 0 becomes
+  // the last day of the previous month. This keeps Yesterday/Week presets
+  // valid around month and year boundaries.
+  const normalized = new Date(Date.UTC(year, month, day));
+  return `${normalized.getUTCFullYear()}-${pad(normalized.getUTCMonth() + 1)}-${pad(normalized.getUTCDate())}`;
+};
 
 /** "YYYY-MM-DD" for today in Vietnam. */
 export const vnToday = (): string => {
@@ -47,4 +52,12 @@ export const vnMonthStart = (): string => {
 export const formatDayMonth = (isoDate: string): string => {
   const [, month, day] = isoDate.split("-");
   return `${day}/${month}`;
+};
+
+/** Format an API timestamp in the salon's fixed Vietnam timezone (UTC+7). */
+export const formatVnDateTime = (isoDate: string, includeYear = false): string => {
+  const shifted = new Date(new Date(isoDate).getTime() + VN_OFFSET_MS);
+  const time = `${pad(shifted.getUTCHours())}:${pad(shifted.getUTCMinutes())}`;
+  const date = `${pad(shifted.getUTCDate())}/${pad(shifted.getUTCMonth() + 1)}`;
+  return `${time} — ${date}${includeYear ? `/${shifted.getUTCFullYear()}` : ""}`;
 };

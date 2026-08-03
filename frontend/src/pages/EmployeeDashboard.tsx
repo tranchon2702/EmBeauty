@@ -1,9 +1,9 @@
 import React, { useState, useEffect } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { LogOut, PlusCircle, BarChart3, Settings as SettingsIcon, ClipboardList, CheckCircle, XCircle, AlertCircle, RefreshCw, KeyRound } from "lucide-react";
+import { LogOut, PlusCircle, BarChart3, Settings as SettingsIcon, ClipboardList, CheckCircle, XCircle, AlertCircle, RefreshCw, KeyRound, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { API_BASE, authFetch, clearSession, getSession } from "../config";
-import { vnToday } from "../lib/date";
+import { formatVnDateTime, vnToday } from "../lib/date";
 
 interface SessionData {
   _id: string;
@@ -30,9 +30,14 @@ interface InvoiceData {
   paymentMethod: "cash" | "bank";
   status: "draft" | "paid" | "cancelled";
   createdAt: string;
+  paidAt: string | null;
   employeeId: {
     name: string;
   };
+  employeeIds?: Array<{
+    _id: string;
+    name: string;
+  }>;
 }
 
 const EmployeeDashboard = () => {
@@ -89,6 +94,23 @@ const EmployeeDashboard = () => {
       fetchData();
     } catch (err: any) {
       toast.error(err.message || "Lỗi hủy phiếu");
+    } finally {
+      setUpdatingStatus(false);
+    }
+  };
+
+  const handleDeleteInvoice = async (inv: InvoiceData) => {
+    if (!confirm(`Xóa vĩnh viễn hóa đơn ${inv.invoiceNumber}? Thao tác này không thể hoàn tác.`)) return;
+    setUpdatingStatus(true);
+    try {
+      const res = await authFetch(`${API_BASE}/invoices/${inv._id}`, { method: "DELETE" });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.message);
+      toast.success(data.message || `Đã xóa hóa đơn ${inv.invoiceNumber}`);
+      setSelectedInvoice(null);
+      await fetchData();
+    } catch (err: any) {
+      toast.error(err.message || "Lỗi xóa hóa đơn");
     } finally {
       setUpdatingStatus(false);
     }
@@ -215,6 +237,11 @@ const EmployeeDashboard = () => {
 
   const formatPrice = (price: number) => {
     return price.toLocaleString("vi-VN") + "đ";
+  };
+
+  const getEmployeeNames = (invoice: InvoiceData) => {
+    const names = invoice.employeeIds?.map((employee) => employee.name).filter(Boolean) || [];
+    return names.length > 0 ? names.join(", ") : invoice.employeeId?.name || "Hệ thống";
   };
 
   return (
@@ -360,7 +387,7 @@ const EmployeeDashboard = () => {
                       <div className="text-xs text-stone-500">
                         <span>Khách: <strong className="text-stone-700">{inv.customerName || "Khách vãng lai"}</strong> {inv.customerPhone && `(${inv.customerPhone})`}</span>
                         <span className="mx-2">•</span>
-                        <span>NV: <strong className="text-stone-700">{inv.employeeId?.name || "Hệ thống"}</strong></span>
+                        <span>NV: <strong className="text-stone-700">{getEmployeeNames(inv)}</strong></span>
                       </div>
                       {inv.services.length > 0 && (
                         <div className="flex flex-wrap gap-1 pt-0.5">
@@ -378,6 +405,11 @@ const EmployeeDashboard = () => {
                       <span className="text-[10px] text-stone-400">
                         Thanh toán: <span className="font-bold">{inv.paymentMethod === "cash" ? "Tiền mặt" : "Chuyển khoản"}</span>
                       </span>
+                      {inv.status === "paid" && inv.paidAt && (
+                        <span className="text-[10px] text-emerald-600 font-semibold">
+                          Đã thu lúc {formatVnDateTime(inv.paidAt, true)}
+                        </span>
+                      )}
                     </div>
                   </div>
                 ))}
@@ -423,12 +455,18 @@ const EmployeeDashboard = () => {
               </div>
               <div className="flex justify-between">
                 <span className="text-stone-500">Nhân viên thực hiện:</span>
-                <span className="font-bold text-stone-800">{selectedInvoice.employeeId?.name || "Hệ thống"}</span>
+                <span className="font-bold text-stone-800 text-right">{getEmployeeNames(selectedInvoice)}</span>
               </div>
               <div className="flex justify-between">
                 <span className="text-stone-500">Hình thức thanh toán:</span>
                 <span className="font-bold text-[#9E5E6F]">{selectedInvoice.paymentMethod === "cash" ? "💵 Tiền mặt" : "🏦 Chuyển khoản QR"}</span>
               </div>
+              {selectedInvoice.status === "paid" && selectedInvoice.paidAt && (
+                <div className="flex justify-between">
+                  <span className="text-stone-500">Thanh toán lúc:</span>
+                  <span className="font-bold text-emerald-700">{formatVnDateTime(selectedInvoice.paidAt, true)}</span>
+                </div>
+              )}
             </div>
 
             {/* Services list */}
@@ -494,6 +532,16 @@ const EmployeeDashboard = () => {
                   className="w-full py-2.5 bg-stone-100 text-stone-700 rounded-xl font-bold text-xs hover:bg-stone-200 transition"
                 >
                   Đóng Window
+                </button>
+              )}
+
+              {session?.role === "admin" && (
+                <button
+                  disabled={updatingStatus}
+                  onClick={() => handleDeleteInvoice(selectedInvoice)}
+                  className="py-2.5 px-4 bg-red-50 hover:bg-red-100 text-red-700 border border-red-200 rounded-xl font-bold text-xs transition flex items-center justify-center gap-1.5 disabled:opacity-50"
+                >
+                  <Trash2 className="w-4 h-4" /> Xóa hóa đơn
                 </button>
               )}
             </div>

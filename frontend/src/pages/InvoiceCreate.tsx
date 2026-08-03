@@ -52,7 +52,7 @@ const InvoiceCreate = () => {
   const [employees, setEmployees] = useState<Employee[]>([]);
 
   // Invoice fields
-  const [selectedEmployee, setSelectedEmployee] = useState("");
+  const [selectedEmployees, setSelectedEmployees] = useState<string[]>([]);
   const [customerPhone, setCustomerPhone] = useState("");
   const [customerName, setCustomerName] = useState("");
   const [customerPoints, setCustomerPoints] = useState<number | null>(null);
@@ -90,7 +90,7 @@ const InvoiceCreate = () => {
     if (!raw) { toast.error("Vui lòng đăng nhập"); navigate("/staff"); return; }
     const s = JSON.parse(raw);
     setSession(s);
-    setSelectedEmployee(s._id); // default to current user
+    setSelectedEmployees([s._id]); // default to current user
   }, [navigate]);
 
   const [searchParams] = useSearchParams();
@@ -109,9 +109,12 @@ const InvoiceCreate = () => {
           setInvoiceStatus(inv.status);
           setCustomerPhone(inv.customerPhone || "");
           setCustomerName(inv.customerName || "");
-          if (inv.employeeId) {
-            setSelectedEmployee(typeof inv.employeeId === "object" ? inv.employeeId._id : inv.employeeId);
-          }
+          const workerIds = Array.isArray(inv.employeeIds) && inv.employeeIds.length > 0
+            ? inv.employeeIds.map((employee: any) => typeof employee === "object" ? employee._id : employee)
+            : inv.employeeId
+              ? [typeof inv.employeeId === "object" ? inv.employeeId._id : inv.employeeId]
+              : [];
+          setSelectedEmployees(workerIds);
           if (Array.isArray(inv.services)) {
             setSelectedServices(inv.services.map((s: any) => ({ name: s.name, price: s.price, quantity: s.quantity || 1 })));
           }
@@ -222,11 +225,18 @@ const InvoiceCreate = () => {
     setCustomServiceName(""); setCustomServicePrice("");
   };
 
+  const toggleEmployee = (employeeId: string) => {
+    setSelectedEmployees((current) => current.includes(employeeId)
+      ? current.filter((id) => id !== employeeId)
+      : [...current, employeeId]);
+  };
+
   // ── Build invoice payload ─────────────────────────────────────────────────
   // totalAmount is deliberately NOT sent — the server recomputes it from the
   // line items so the till can never post a figure that does not add up.
   const buildPayload = useCallback(() => ({
-    employeeId: selectedEmployee,
+    employeeId: selectedEmployees[0],
+    employeeIds: selectedEmployees,
     customerPhone: customerPhone.trim(),
     customerName: customerName.trim(),
     services: selectedServices,
@@ -236,7 +246,7 @@ const InvoiceCreate = () => {
     paymentMethod,
     bankAccountId: paymentMethod === "bank" ? selectedBankId || null : null,
     note: invoiceNote,
-  }), [selectedEmployee, customerPhone, customerName, selectedServices, discount, surcharge, surchargeNote, paymentMethod, selectedBankId, invoiceNote]);
+  }), [selectedEmployees, customerPhone, customerName, selectedServices, discount, surcharge, surchargeNote, paymentMethod, selectedBankId, invoiceNote]);
 
   /** Adopt whatever the server stored, so the QR amount and the receipt agree. */
   const syncFromServer = (inv: any) => {
@@ -251,7 +261,7 @@ const InvoiceCreate = () => {
 
   // ── Save/Update draft ─────────────────────────────────────────────────────
   const handleSaveDraft = async () => {
-    if (!selectedEmployee) { toast.warning("Chọn thợ làm dịch vụ"); return; }
+    if (selectedEmployees.length === 0) { toast.warning("Chọn ít nhất một thợ làm dịch vụ"); return; }
     if (selectedServices.length === 0) { toast.warning("Thêm ít nhất 1 dịch vụ"); return; }
     // Customer validation removed (loyalty disabled)
 
@@ -376,15 +386,20 @@ const InvoiceCreate = () => {
 
         {/* ── Staff Selector (avatar chips) ── */}
         <div className="bg-white border-b border-stone-100 px-4 py-3">
-          <p className="text-[10px] font-bold text-stone-400 uppercase tracking-wider mb-2.5">Thợ thực hiện *</p>
+          <div className="flex items-center justify-between gap-3 mb-2.5">
+            <p className="text-[10px] font-bold text-stone-400 uppercase tracking-wider">Thợ thực hiện *</p>
+            <span className="text-[9px] text-stone-400">Có thể chọn nhiều người</span>
+          </div>
           <div className="flex gap-3 overflow-x-auto no-scrollbar pb-0.5">
             {employees.map((emp) => {
-              const isSelected = selectedEmployee === emp._id;
+              const isSelected = selectedEmployees.includes(emp._id);
               const initials = emp.name.split(" ").slice(-2).map((w: string) => w[0]).join("").toUpperCase();
               return (
                 <button
                   key={emp._id}
-                  onClick={() => setSelectedEmployee(emp._id)}
+                  type="button"
+                  aria-pressed={isSelected}
+                  onClick={() => toggleEmployee(emp._id)}
                   className={`flex flex-col items-center gap-1.5 shrink-0 transition-all duration-200 ${
                     isSelected ? "scale-105" : "opacity-50"
                   }`}
@@ -620,7 +635,7 @@ const InvoiceCreate = () => {
         </div>
         <button
           onClick={handleSaveDraft}
-          disabled={loading || selectedServices.length === 0}
+          disabled={loading || selectedServices.length === 0 || selectedEmployees.length === 0}
           className="px-5 py-3 bg-[#9E5E6F] hover:bg-[#8D5060] text-white font-bold text-sm rounded-2xl disabled:bg-stone-300 disabled:shadow-none transition active:scale-95 shadow-lg shadow-[#9E5E6F]/30 flex items-center gap-2 shrink-0"
         >
           {loading ? (
@@ -647,6 +662,12 @@ const InvoiceCreate = () => {
             <div className="p-5 space-y-4">
               {/* Invoice summary */}
               <div className="bg-stone-50 rounded-xl p-3 text-xs space-y-1.5 border border-stone-100">
+                <div className="flex justify-between gap-3 pb-1.5 border-b border-stone-200">
+                  <span className="text-stone-500 shrink-0">Thợ thực hiện</span>
+                  <span className="font-semibold text-stone-800 text-right">
+                    {employees.filter(employee => selectedEmployees.includes(employee._id)).map(employee => employee.name).join(", ")}
+                  </span>
+                </div>
                 {selectedServices.map((s, i) => (
                   <div key={i} className="flex justify-between">
                     <span className="text-stone-600">{s.name} × {s.quantity}</span>

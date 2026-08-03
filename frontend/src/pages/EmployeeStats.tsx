@@ -2,12 +2,12 @@ import React, { useState, useEffect } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import {
   ArrowLeft, Calendar, TrendingUp, UserCheck, AlertCircle,
-  ShoppingBag, Filter, RefreshCw, Banknote, CreditCard, Lock
+  ShoppingBag, Filter, RefreshCw, Banknote, CreditCard, Lock, Trash2
 } from "lucide-react";
 import { toast } from "sonner";
 import { API_BASE, authFetch } from "../config";
 import { StyledSelect } from "../components/StyledSelect";
-import { vnToday, vnDaysAgo, vnWeekStart, vnMonthStart, formatDayMonth } from "../lib/date";
+import { vnToday, vnDaysAgo, vnWeekStart, vnMonthStart, formatDayMonth, formatVnDateTime } from "../lib/date";
 
 interface InvoiceData {
   _id: string;
@@ -24,6 +24,11 @@ interface InvoiceData {
     name: string;
     avatar?: string;
   };
+  employeeIds?: Array<{
+    _id: string;
+    name: string;
+    avatar?: string;
+  }>;
   createdAt: string;
   paidAt: string | null;
 }
@@ -75,6 +80,7 @@ const EmployeeStats = () => {
   const [stats, setStats] = useState<SummaryData>(EMPTY_SUMMARY);
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [loading, setLoading] = useState(true);
+  const [isAdmin, setIsAdmin] = useState(false);
 
   // Filters
   const [datePreset, setDatePreset] = useState<DatePreset>("today");
@@ -87,7 +93,12 @@ const EmployeeStats = () => {
   // Session check
   useEffect(() => {
     const raw = localStorage.getItem("embeauty_session");
-    if (!raw) { toast.error("Vui lòng đăng nhập trước"); navigate("/staff"); }
+    if (!raw) { toast.error("Vui lòng đăng nhập trước"); navigate("/staff"); return; }
+    try {
+      setIsAdmin(JSON.parse(raw).role === "admin");
+    } catch {
+      navigate("/staff");
+    }
   }, [navigate]);
 
   // Apply preset dates
@@ -139,9 +150,22 @@ const EmployeeStats = () => {
   useEffect(() => { fetchData(); }, [dateFrom, dateTo, filterStatus, filterEmployee, filterPayment]);
 
   const formatPrice = (p: number) => p.toLocaleString("vi-VN") + "đ";
-  const formatDate = (s: string) => {
-    const d = new Date(s);
-    return `${d.getHours().toString().padStart(2, "0")}:${d.getMinutes().toString().padStart(2, "0")} — ${d.getDate().toString().padStart(2, "0")}/${(d.getMonth() + 1).toString().padStart(2, "0")}`;
+  const getEmployeeNames = (invoice: InvoiceData) => {
+    const names = invoice.employeeIds?.map((employee) => employee.name).filter(Boolean) || [];
+    return names.length > 0 ? names.join(", ") : invoice.employeeId?.name || "Khác";
+  };
+
+  const handleDeleteInvoice = async (invoice: InvoiceData) => {
+    if (!confirm(`Xóa vĩnh viễn hóa đơn ${invoice.invoiceNumber}? Thao tác này không thể hoàn tác.`)) return;
+    try {
+      const res = await authFetch(`${API_BASE}/invoices/${invoice._id}`, { method: "DELETE" });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.message);
+      toast.success(data.message || `Đã xóa hóa đơn ${invoice.invoiceNumber}`);
+      await fetchData();
+    } catch (error: any) {
+      toast.error(error.message || "Lỗi xóa hóa đơn");
+    }
   };
 
   return (
@@ -325,8 +349,11 @@ const EmployeeStats = () => {
                 {/* Employee Performance */}
                 <div className="bg-white rounded-2xl p-5 border border-stone-200/60 shadow-sm space-y-4">
                   <h2 className="text-xs font-bold text-stone-400 uppercase tracking-wider flex items-center gap-2">
-                    <UserCheck className="w-4 h-4 text-[#9E5E6F]" /> Doanh Số Theo Nhân Viên
+                    <UserCheck className="w-4 h-4 text-[#9E5E6F]" /> Giá Trị Bill Theo Nhân Viên
                   </h2>
+                  <p className="text-[10px] text-stone-400 leading-relaxed">
+                    Bill có nhiều thợ được ghi nhận cho từng người để đối chiếu khi tính %. Không cộng các dòng nhân viên để thay cho tổng doanh thu ở trên.
+                  </p>
 
                   {stats.employeeStats.length === 0 ? (
                     <p className="text-xs text-stone-400 italic py-6 text-center">Chưa có dữ liệu doanh số</p>
@@ -454,9 +481,11 @@ const EmployeeStats = () => {
                               </span>
                             </div>
                             <div className="text-[10px] text-stone-400 flex flex-wrap gap-x-3">
-                              <span>⏰ {formatDate(inv.createdAt)}</span>
+                              <span>
+                                ⏰ {inv.status === "paid" && inv.paidAt ? "TT" : "Tạo"} {formatVnDateTime(inv.status === "paid" && inv.paidAt ? inv.paidAt : inv.createdAt)}
+                              </span>
                               <span>👤 {inv.customerName || inv.customerPhone || "Vãng lai"}</span>
-                              <span>💇 <strong className="text-stone-600">{inv.employeeId?.name || "Khác"}</strong></span>
+                              <span>💇 <strong className="text-stone-600">{getEmployeeNames(inv)}</strong></span>
                             </div>
                             {inv.services && inv.services.length > 0 && (
                               <div className="flex flex-wrap gap-1 pt-0.5">
@@ -478,6 +507,17 @@ const EmployeeStats = () => {
                               <span className="text-[9px] text-[#9E5E6F] font-semibold bg-[#F9ECEF] px-1.5 py-0.5 rounded-full">
                                 +{inv.pointsEarned} pt
                               </span>
+                            )}
+                            {isAdmin && (
+                              <button
+                                type="button"
+                                onClick={() => handleDeleteInvoice(inv)}
+                                className="ml-auto mt-1 p-1.5 rounded-lg border border-red-100 bg-red-50 text-red-600 hover:bg-red-100 transition"
+                                title={`Xóa hóa đơn ${inv.invoiceNumber}`}
+                                aria-label={`Xóa hóa đơn ${inv.invoiceNumber}`}
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
                             )}
                           </div>
                         </div>

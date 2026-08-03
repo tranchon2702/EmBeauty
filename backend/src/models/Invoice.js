@@ -21,6 +21,13 @@ const invoiceSchema = new mongoose.Schema({
     required: true,
     index: true
   },
+  // Every technician who worked on the bill. `employeeId` remains the primary
+  // technician for backwards compatibility with invoices created before this
+  // multi-technician field existed.
+  employeeIds: [{
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Employee'
+  }],
   // Who actually rang the invoice up. Staff may only edit their own; admins any.
   createdBy: {
     type: mongoose.Schema.Types.ObjectId,
@@ -92,6 +99,7 @@ const invoiceSchema = new mongoose.Schema({
 // Supports "paid invoices in a date range, optionally per employee".
 invoiceSchema.index({ status: 1, paidAt: -1 });
 invoiceSchema.index({ createdAt: -1 });
+invoiceSchema.index({ employeeIds: 1, paidAt: -1 });
 
 const Invoice = mongoose.model('Invoice', invoiceSchema);
 export default Invoice;
