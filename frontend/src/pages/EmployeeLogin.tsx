@@ -241,7 +241,10 @@ const EmployeeLogin = () => {
     : "Nhập mã PIN 4 chữ số";
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-[#F9ECEF] via-[#FDFBF7] to-[#F0EAE5] flex flex-col items-center justify-center p-4">
+    <div className="min-h-screen bg-gradient-to-br from-[#F9ECEF] via-[#FDFBF7] to-[#F0EAE5] flex flex-col items-center justify-center"
+      style={{ paddingTop: "env(safe-area-inset-top,0px)", paddingBottom: "env(safe-area-inset-bottom,0px)", padding: "env(safe-area-inset-top,0px) env(safe-area-inset-right,0px) env(safe-area-inset-bottom,0px) env(safe-area-inset-left,0px)" }}
+    >
+      <div className="flex flex-col items-center justify-center flex-1 w-full p-4">
       {/* Logo / Brand */}
       <div className="text-center mb-8">
         <div className="w-12 h-12 bg-primary rounded-2xl flex items-center justify-center mx-auto mb-3 shadow-lg shadow-primary/25">
@@ -404,10 +407,10 @@ const EmployeeLogin = () => {
                       else if (key !== "") handlePinInput(key);
                     }}
                     disabled={loading || key === ""}
-                    className={`h-14 rounded-2xl text-lg font-bold transition-colors duration-150 active:scale-95 ${key === "" ? "invisible" : key === "⌫"
+                    className={`numpad-btn ${key === "" ? "invisible" : key === "⌫"
                       ? "bg-stone-100 text-stone-500 hover:bg-stone-200"
                       : "bg-stone-50 text-stone-800 hover:bg-[#F9ECEF] hover:text-[#9E5E6F] border border-stone-150 shadow-sm"
-                      } disabled:opacity-50`}
+                    } disabled:opacity-50`}
                   >
                     {key}
                   </button>
@@ -416,6 +419,7 @@ const EmployeeLogin = () => {
             </div>
           </div>
         )}
+      </div>
       </div>
     </div>
   );

@@ -5,6 +5,8 @@ import { toast } from "sonner";
 import { API_BASE, authFetch, getSession } from "../config";
 import { compressAvatar, compressQRImage, getBase64SizeKB } from "../lib/imageUtils";
 import { BankSelect } from "../components/BankSelect";
+import { PaymentAccountLogo } from "../components/PaymentAccountLogo";
+import { matchesVietnameseSearch } from "../lib/search";
 
 interface Employee {
   _id: string;
@@ -24,6 +26,8 @@ interface Service {
   category: string;
   description?: string;
   isActive?: boolean;
+  showOnMenu?: boolean;
+  showInInvoice?: boolean;
 }
 
 interface Category {
@@ -36,12 +40,23 @@ interface Category {
 
 interface BankAccount {
   _id: string;
+  accountType?: "bank" | "momo";
   bankId: string;
   bankName: string;
   accountNumber: string;
   accountHolder: string;
   displayName: string;
   qrImageBase64?: string;
+}
+
+interface BankFormState {
+  accountType: "bank" | "momo";
+  bankId: string;
+  bankName: string;
+  accountNumber: string;
+  accountHolder: string;
+  displayName: string;
+  qrImageBase64: string;
 }
 
 interface RankSettings {
@@ -88,6 +103,16 @@ type RankTierKey = typeof RANK_TIERS[number]["key"];
 
 const benefitsKey = (tier: RankTierKey) => `${tier}Benefits` as keyof RankSettings;
 
+const EMPTY_BANK_FORM: BankFormState = {
+  accountType: "bank",
+  bankId: "mbbank",
+  bankName: "MB Bank",
+  accountNumber: "",
+  accountHolder: "",
+  displayName: "",
+  qrImageBase64: "",
+};
+
 // Bank options are now handled by BankSelect component (full list in vietnamBanks.ts)
 
 const EmployeeManagement = () => {
@@ -121,7 +146,7 @@ const EmployeeManagement = () => {
 
   // Service form
   const [editingSrvId, setEditingSrvId] = useState<string | null>(null);
-  const [srvForm, setSrvForm] = useState({ name: "", price: "", category: "", description: "", isActive: true });
+  const [srvForm, setSrvForm] = useState({ name: "", price: "", category: "", description: "", isActive: true, showOnMenu: true, showInInvoice: true });
 
   // Category form
   const [editingCatId, setEditingCatId] = useState<string | null>(null);
@@ -129,7 +154,7 @@ const EmployeeManagement = () => {
 
   // Bank form
   const [editingBankId, setEditingBankId] = useState<string | null>(null);
-  const [bankForm, setBankForm] = useState({ bankId: "mbbank", bankName: "MB Bank", accountNumber: "", accountHolder: "", displayName: "", qrImageBase64: "" });
+  const [bankForm, setBankForm] = useState<BankFormState>({ ...EMPTY_BANK_FORM });
 
   // Reset PIN modal
   const [resetPinEmpId, setResetPinEmpId] = useState<string | null>(null);
@@ -300,7 +325,8 @@ const EmployeeManagement = () => {
 
   // ── Service CRUD ──────────────────────────────────────────────────────────
   const blankSrvForm = () => ({
-    name: "", price: "", category: categories[0]?.key || "", description: "", isActive: true,
+    name: "", price: "", category: categories[0]?.key || "", description: "",
+    isActive: true, showOnMenu: true, showInInvoice: true,
   });
 
   const handleSrvSubmit = async (e: React.FormEvent) => {
@@ -332,6 +358,8 @@ const EmployeeManagement = () => {
       category: s.category,
       description: s.description || "",
       isActive: s.isActive !== false,
+      showOnMenu: s.showOnMenu !== false,
+      showInInvoice: s.showInInvoice !== false,
     });
   };
 
@@ -395,6 +423,10 @@ const EmployeeManagement = () => {
       toast.warning("Điền đủ thông tin tài khoản");
       return;
     }
+    if (bankForm.accountType === "momo" && !bankForm.qrImageBase64) {
+      toast.warning("Ví MoMo cần tải ảnh mã QR nhận tiền");
+      return;
+    }
     try {
       const url = editingBankId ? `${API_BASE}/bank-accounts/${editingBankId}` : `${API_BASE}/bank-accounts`;
       const method = editingBankId ? "PUT" : "POST";
@@ -403,17 +435,19 @@ const EmployeeManagement = () => {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(bankForm),
       });
-      if (!res.ok) throw new Error();
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.message);
       toast.success(editingBankId ? "Cập nhật tài khoản thành công" : "Thêm tài khoản thành công");
-      setBankForm({ bankId: "mbbank", bankName: "MB Bank", accountNumber: "", accountHolder: "", displayName: "", qrImageBase64: "" });
+      setBankForm({ ...EMPTY_BANK_FORM });
       setEditingBankId(null);
       fetchAll();
-    } catch { toast.error("Lỗi lưu tài khoản ngân hàng"); }
+    } catch (err: any) { toast.error(err.message || "Lỗi lưu tài khoản thanh toán"); }
   };
 
   const handleEditBank = (b: BankAccount) => {
     setEditingBankId(b._id);
     setBankForm({
+      accountType: b.accountType === "momo" ? "momo" : "bank",
       bankId: b.bankId, bankName: b.bankName, accountNumber: b.accountNumber,
       accountHolder: b.accountHolder, displayName: b.displayName, qrImageBase64: b.qrImageBase64 || ""
     });
@@ -449,14 +483,17 @@ const EmployeeManagement = () => {
     { key: "staff", label: "👤 Nhân Viên" },
     { key: "services", label: "💅 Dịch Vụ" },
     { key: "categories", label: "🏷️ Danh Mục" },
-    { key: "banks", label: "🏦 Tài Khoản QR" },
+    { key: "banks", label: "💳 Thanh Toán QR" },
     { key: "settings", label: "⚙️ Cấu Hình" },
   ] as const;
 
   return (
-    <div className="min-h-screen bg-[#FDFBF7] pb-12">
+    <div className="min-h-screen bg-[#FDFBF7] overscroll-contain" style={{ paddingBottom: "env(safe-area-inset-bottom,0px)" }}>
       {/* Header */}
-      <div className="bg-[#9E5E6F] text-white py-4 px-5 flex items-center justify-between shadow-md sticky top-0 z-20">
+      <div
+        className="bg-[#9E5E6F] text-white px-5 flex items-center justify-between shadow-md sticky top-0 z-20"
+        style={{ paddingTop: "calc(env(safe-area-inset-top,0px) + 12px)", paddingBottom: "12px" }}
+      >
         <div className="flex items-center gap-3">
           <Link to="/employee/dashboard" className="p-1.5 hover:bg-white/15 rounded-full transition">
             <ArrowLeft className="w-5 h-5" />
@@ -661,15 +698,45 @@ const EmployeeManagement = () => {
                         onChange={e => setSrvForm(f => ({ ...f, description: e.target.value }))}
                         className="w-full px-3 py-2 bg-stone-50 border border-stone-200 rounded-xl focus:outline-none" />
                     </div>
-                    <div className="flex items-center gap-2 pt-1">
-                      <button type="button"
-                        onClick={() => setSrvForm(f => ({ ...f, isActive: !f.isActive }))}
-                        className={`relative w-10 h-5 rounded-full transition shrink-0 ${srvForm.isActive ? "bg-emerald-500" : "bg-stone-300"}`}>
-                        <div className={`absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-all ${srvForm.isActive ? "left-[22px]" : "left-0.5"}`} />
-                      </button>
-                      <span className="text-[10px] font-bold text-stone-500">
-                        {srvForm.isActive ? "Đang bán — hiện trên bảng giá" : "Tạm ẩn — không hiện với khách"}
-                      </span>
+                    {/* Visibility toggles */}
+                    <div className="space-y-2 pt-1">
+                      <p className="text-[10px] text-stone-400 font-bold uppercase tracking-wider">Hiển thị</p>
+                      <div className="flex items-center gap-2">
+                        <button type="button"
+                          onClick={() => setSrvForm(f => ({ ...f, isActive: !f.isActive }))}
+                          aria-pressed={srvForm.isActive}
+                          aria-label="Bật hoặc tắt dịch vụ ở mọi nơi"
+                          className={`relative w-10 h-5 rounded-full transition shrink-0 ${srvForm.isActive ? "bg-emerald-500" : "bg-stone-300"}`}>
+                          <div className={`absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-all ${srvForm.isActive ? "left-[22px]" : "left-0.5"}`} />
+                        </button>
+                        <span className="text-[10px] font-bold text-stone-500">
+                          {srvForm.isActive ? "✅ Đang hoạt động" : "⛔ Tạm ngừng (ẩn mọi nơi)"}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <button type="button"
+                          onClick={() => setSrvForm(f => ({ ...f, showOnMenu: !f.showOnMenu }))}
+                          aria-pressed={srvForm.showOnMenu}
+                          aria-label="Hiển thị dịch vụ trên menu khách"
+                          className={`relative w-10 h-5 rounded-full transition shrink-0 ${srvForm.showOnMenu ? "bg-blue-500" : "bg-stone-300"}`}>
+                          <div className={`absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-all ${srvForm.showOnMenu ? "left-[22px]" : "left-0.5"}`} />
+                        </button>
+                        <span className="text-[10px] text-stone-500">
+                          <span className="font-bold">📋 Menu khách</span> — hiện trên bảng giá công khai
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <button type="button"
+                          onClick={() => setSrvForm(f => ({ ...f, showInInvoice: !f.showInInvoice }))}
+                          aria-pressed={srvForm.showInInvoice}
+                          aria-label="Hiển thị dịch vụ khi lập hóa đơn"
+                          className={`relative w-10 h-5 rounded-full transition shrink-0 ${srvForm.showInInvoice ? "bg-violet-500" : "bg-stone-300"}`}>
+                          <div className={`absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-all ${srvForm.showInInvoice ? "left-[22px]" : "left-0.5"}`} />
+                        </button>
+                        <span className="text-[10px] text-stone-500">
+                          <span className="font-bold">🧾 Lập hóa đơn</span> — hiện khi nhân viên tạo bill
+                        </span>
+                      </div>
                     </div>
                     <div className="flex gap-2 pt-1">
                       {editingSrvId && (
@@ -795,31 +862,79 @@ const EmployeeManagement = () => {
                 <div className="md:col-span-2 bg-white rounded-2xl p-5 border border-stone-200/60 shadow-sm h-fit">
                   <h2 className="text-xs font-bold text-stone-400 uppercase tracking-wider mb-4 flex items-center gap-1.5">
                     <Landmark className="w-3.5 h-3.5 text-[#9E5E6F]" />
-                    {editingBankId ? "Cập nhật tài khoản" : "Thêm tài khoản QR"}
+                    {editingBankId ? "Cập nhật tài khoản" : "Thêm tài khoản thanh toán"}
                   </h2>
                   <form onSubmit={handleBankSubmit} className="space-y-3 text-xs">
                     <div>
-                      <label className="text-[10px] text-stone-400 font-bold block mb-1">Ngân hàng</label>
-                      <BankSelect
-                        value={bankForm.bankId}
-                        onChange={(id, name) => setBankForm(f => ({ ...f, bankId: id, bankName: name }))}
-                      />
+                      <label className="text-[10px] text-stone-400 font-bold block mb-1.5">Loại tài khoản *</label>
+                      <div className="grid grid-cols-2 gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setBankForm({ ...EMPTY_BANK_FORM })}
+                          className={`min-h-12 rounded-xl border flex items-center justify-center gap-2 font-bold transition ${
+                            bankForm.accountType === "bank"
+                              ? "bg-[#F9ECEF] border-[#9E5E6F] text-[#9E5E6F]"
+                              : "bg-stone-50 border-stone-200 text-stone-500"
+                          }`}
+                        >
+                          <Landmark className="w-4 h-4" /> Ngân hàng
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setBankForm({
+                            ...EMPTY_BANK_FORM,
+                            accountType: "momo",
+                            bankId: "momo",
+                            bankName: "MoMo",
+                            displayName: "Ví MoMo",
+                          })}
+                          className={`min-h-12 rounded-xl border flex items-center justify-center gap-2 font-bold transition ${
+                            bankForm.accountType === "momo"
+                              ? "bg-[#FCE6F2] border-[#A50064] text-[#A50064]"
+                              : "bg-stone-50 border-stone-200 text-stone-500"
+                          }`}
+                        >
+                          <PaymentAccountLogo accountType="momo" bankId="momo" name="MoMo" className="w-8 h-8" />
+                          Ví MoMo
+                        </button>
+                      </div>
                     </div>
+                    {bankForm.accountType === "bank" ? (
+                      <div>
+                        <label className="text-[10px] text-stone-400 font-bold block mb-1">Ngân hàng</label>
+                        <BankSelect
+                          value={bankForm.bankId}
+                          onChange={(id, name) => setBankForm(f => ({ ...f, bankId: id, bankName: name }))}
+                        />
+                      </div>
+                    ) : (
+                      <div className="rounded-xl border border-[#F1B4D2] bg-[#FFF5FA] p-3 flex items-center gap-3">
+                        <PaymentAccountLogo accountType="momo" bankId="momo" name="MoMo" className="w-11 h-11" />
+                        <div>
+                          <p className="font-bold text-[#A50064]">Ví MoMo</p>
+                          <p className="text-[10px] text-stone-500">Nhập số điện thoại và tải QR nhận tiền của ví.</p>
+                        </div>
+                      </div>
+                    )}
                     <div>
-                      <label className="text-[10px] text-stone-400 font-bold block mb-1">Số tài khoản *</label>
-                      <input type="text" required placeholder="0358367919" value={bankForm.accountNumber}
+                      <label className="text-[10px] text-stone-400 font-bold block mb-1">
+                        {bankForm.accountType === "momo" ? "Số điện thoại Ví MoMo *" : "Số tài khoản *"}
+                      </label>
+                      <input type="text" required placeholder={bankForm.accountType === "momo" ? "0901234567" : "0358367919"} value={bankForm.accountNumber}
                         onChange={e => setBankForm(f => ({ ...f, accountNumber: e.target.value.replace(/\D/g, "") }))}
                         className="w-full px-3 py-2 bg-stone-50 border border-stone-200 rounded-xl font-mono font-bold focus:outline-none" />
                     </div>
                     <div>
-                      <label className="text-[10px] text-stone-400 font-bold block mb-1">Chủ tài khoản (VIẾT HOA, không dấu) *</label>
+                      <label className="text-[10px] text-stone-400 font-bold block mb-1">
+                        {bankForm.accountType === "momo" ? "Tên chủ Ví MoMo *" : "Chủ tài khoản (VIẾT HOA, không dấu) *"}
+                      </label>
                       <input type="text" required placeholder="THAI NGOC QUYNH NHU" value={bankForm.accountHolder}
                         onChange={e => setBankForm(f => ({ ...f, accountHolder: e.target.value.toUpperCase() }))}
                         className="w-full px-3 py-2 bg-stone-50 border border-stone-200 rounded-xl font-bold focus:outline-none" />
                     </div>
                     <div>
                       <label className="text-[10px] text-stone-400 font-bold block mb-1">Tên gợi nhớ hiển thị *</label>
-                      <input type="text" required placeholder="MB Bank (Quỳnh Như)" value={bankForm.displayName}
+                      <input type="text" required placeholder={bankForm.accountType === "momo" ? "Ví MoMo (Quỳnh Như)" : "MB Bank (Quỳnh Như)"} value={bankForm.displayName}
                         onChange={e => setBankForm(f => ({ ...f, displayName: e.target.value }))}
                         className="w-full px-3 py-2 bg-stone-50 border border-stone-200 rounded-xl focus:outline-none" />
                     </div>
@@ -827,8 +942,10 @@ const EmployeeManagement = () => {
                     {/* Static QR upload */}
                     <div className="border-t border-stone-100 pt-3">
                       <label className="text-[10px] text-stone-400 font-bold block mb-1">
-                        Ảnh mã QR tĩnh (tùy chọn)
-                        <span className="text-stone-300 font-normal"> — Nếu có, sẽ dùng thay VietQR tự động</span>
+                        Ảnh mã QR {bankForm.accountType === "momo" ? "*" : "tĩnh (tùy chọn)"}
+                        <span className="text-stone-300 font-normal">
+                          {bankForm.accountType === "momo" ? " — Bắt buộc với Ví MoMo" : " — Nếu có, sẽ dùng thay VietQR tự động"}
+                        </span>
                       </label>
                       {bankForm.qrImageBase64 && (
                         <div className="relative mb-2 w-28">
@@ -846,7 +963,7 @@ const EmployeeManagement = () => {
 
                     <div className="flex gap-2 pt-1">
                       {editingBankId && (
-                        <button type="button" onClick={() => { setEditingBankId(null); setBankForm({ bankId: "mbbank", bankName: "MB Bank", accountNumber: "", accountHolder: "", displayName: "", qrImageBase64: "" }); }}
+                        <button type="button" onClick={() => { setEditingBankId(null); setBankForm({ ...EMPTY_BANK_FORM }); }}
                           className="flex-1 py-2 bg-stone-100 text-stone-600 rounded-xl font-bold">Hủy</button>
                       )}
                       <button type="submit" className="flex-grow py-2 bg-[#9E5E6F] hover:bg-[#8D5060] text-white rounded-xl font-bold transition flex items-center justify-center gap-1">
@@ -858,18 +975,24 @@ const EmployeeManagement = () => {
 
                 {/* Bank list */}
                 <div className="md:col-span-3 bg-white rounded-2xl p-5 border border-stone-200/60 shadow-sm">
-                  <h2 className="text-xs font-bold text-stone-400 uppercase tracking-wider mb-4">Tài khoản QR đã khai báo</h2>
+                  <h2 className="text-xs font-bold text-stone-400 uppercase tracking-wider mb-4">Tài khoản thanh toán đã khai báo</h2>
                   <div className="space-y-3">
                     {bankAccounts.map(b => (
                       <div key={b._id} className="flex items-start gap-3 p-3 bg-stone-50 rounded-xl border border-stone-100">
-                        {/* QR Thumbnail */}
-                        {b.qrImageBase64 && (
-                          <img src={b.qrImageBase64} alt="QR" className="w-12 h-12 object-contain rounded-lg border border-stone-200 shrink-0" />
-                        )}
+                        <PaymentAccountLogo
+                          accountType={b.accountType === "momo" ? "momo" : "bank"}
+                          bankId={b.bankId}
+                          name={b.bankName}
+                          className="w-12 h-12"
+                        />
                         <div className="flex-1 min-w-0">
                           <p className="text-xs font-bold text-[#9E5E6F]">{b.displayName}</p>
-                          <p className="text-[10px] text-stone-600 font-semibold">{b.bankName}</p>
-                          <p className="text-[10px] text-stone-400 font-mono">STK: {b.accountNumber}</p>
+                          <p className="text-[10px] text-stone-600 font-semibold">
+                            {b.accountType === "momo" ? "Ví điện tử MoMo" : b.bankName}
+                          </p>
+                          <p className="text-[10px] text-stone-400 font-mono">
+                            {b.accountType === "momo" ? "SĐT" : "STK"}: {b.accountNumber}
+                          </p>
                           <p className="text-[10px] text-stone-500 font-bold">{b.accountHolder}</p>
                         </div>
                         <div className="flex gap-1 shrink-0">
@@ -1118,7 +1241,8 @@ const ServiceListPanel = ({
 
   const filtered = services.filter(s => {
     const matchCat = catFilter === "all" || s.category === catFilter;
-    const matchSearch = search.trim() === "" || s.name.toLowerCase().includes(search.toLowerCase());
+    const category = categories.find(item => item.key === s.category);
+    const matchSearch = matchesVietnameseSearch(search, s.name, s.description, category?.name);
     return matchCat && matchSearch;
   });
 
@@ -1216,6 +1340,14 @@ const ServiceListPanel = ({
                     )}
                   </p>
                   {s.description && <p className="text-[10px] text-stone-400 truncate">{s.description}</p>}
+                  <div className="flex flex-wrap gap-1 mt-1">
+                    <span className={`text-[8px] font-bold px-1.5 py-0.5 rounded ${s.showOnMenu !== false ? "bg-blue-50 text-blue-600" : "bg-stone-100 text-stone-400 line-through"}`}>
+                      Menu khách
+                    </span>
+                    <span className={`text-[8px] font-bold px-1.5 py-0.5 rounded ${s.showInInvoice !== false ? "bg-violet-50 text-violet-600" : "bg-stone-100 text-stone-400 line-through"}`}>
+                      Lập hóa đơn
+                    </span>
+                  </div>
                 </div>
 
                 {/* Price */}
@@ -1228,7 +1360,7 @@ const ServiceListPanel = ({
                   <button
                     onClick={() => onToggleActive(s)}
                     className="p-1.5 text-stone-400 hover:text-stone-700 hover:bg-stone-100 rounded-lg transition-colors duration-150"
-                    title={s.isActive === false ? "Hiện lại trên bảng giá" : "Tạm ẩn khỏi bảng giá"}
+                    title={s.isActive === false ? "Bật lại dịch vụ ở mọi nơi" : "Tạm ngừng dịch vụ ở mọi nơi"}
                   >
                     {s.isActive === false ? <EyeOff className="w-[13px] h-[13px]" /> : <Eye className="w-[13px] h-[13px]" />}
                   </button>

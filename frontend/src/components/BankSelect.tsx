@@ -1,6 +1,8 @@
 import React, { useState, useRef, useEffect } from "react";
 import { Search, ChevronDown, Check } from "lucide-react";
 import { VIETNAM_BANKS } from "../lib/vietnamBanks";
+import { PaymentAccountLogo } from "./PaymentAccountLogo";
+import { matchesVietnameseSearch } from "../lib/search";
 
 interface BankSelectProps {
   value: string;
@@ -14,10 +16,8 @@ export const BankSelect: React.FC<BankSelectProps> = ({ value, onChange }) => {
 
   const selectedBank = VIETNAM_BANKS.find(b => b.id === value || b.code.toLowerCase() === value.toLowerCase()) || VIETNAM_BANKS[0];
 
-  const filteredBanks = VIETNAM_BANKS.filter(b => 
-    b.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    b.shortName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    b.code.toLowerCase().includes(searchTerm.toLowerCase())
+  const filteredBanks = VIETNAM_BANKS.filter(bank =>
+    matchesVietnameseSearch(searchTerm, bank.name, bank.shortName, bank.code)
   );
 
   useEffect(() => {
@@ -39,9 +39,7 @@ export const BankSelect: React.FC<BankSelectProps> = ({ value, onChange }) => {
         className="w-full px-3 py-2 bg-stone-50 border border-stone-200 rounded-xl text-left font-medium text-stone-800 flex items-center justify-between hover:bg-stone-100/80 transition focus:outline-none focus:ring-1 focus:ring-[#9E5E6F]"
       >
         <div className="flex items-center gap-2 truncate">
-          <span className="bg-[#9E5E6F]/10 text-[#9E5E6F] font-bold text-[10px] px-1.5 py-0.5 rounded uppercase">
-            {selectedBank.code}
-          </span>
+          <PaymentAccountLogo bankId={selectedBank.id} name={selectedBank.shortName} className="w-8 h-8" />
           <span className="truncate">{selectedBank.shortName}</span>
         </div>
         <ChevronDown className={`w-4 h-4 text-stone-400 transition-transform ${isOpen ? "rotate-180" : ""}`} />
@@ -84,9 +82,7 @@ export const BankSelect: React.FC<BankSelectProps> = ({ value, onChange }) => {
                     }`}
                   >
                     <div className="flex items-center gap-2.5 min-w-0 pr-2">
-                      <span className="bg-stone-100 text-stone-600 font-mono font-bold text-[10px] px-1.5 py-0.5 rounded shrink-0">
-                        {b.code}
-                      </span>
+                      <PaymentAccountLogo bankId={b.id} name={b.shortName} className="w-9 h-9" />
                       <div className="truncate">
                         <p className="font-semibold truncate">{b.shortName}</p>
                         <p className="text-[10px] text-stone-400 truncate">{b.name}</p>

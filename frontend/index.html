@@ -14,6 +14,8 @@
     <meta name="apple-mobile-web-app-title" content="EM Beauty" />
     <meta name="application-name" content="EM Beauty" />
     <meta name="msapplication-TileColor" content="#9E5E6F" />
+    <!-- Prevent iOS from auto-linking phone numbers/emails in app UI -->
+    <meta name="format-detection" content="telephone=no, email=no, address=no" />
 
     <title>EM Beauty - Nails &amp; Makeup Chuyên Nghiệp</title>
     <meta name="description" content="EM Beauty — Nails &amp; Makeup chăm sóc sắc đẹp chuyên nghiệp. Đặt lịch nhanh, tra cứu điểm thành viên, xem bảng giá dịch vụ.">
@@ -30,9 +32,14 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Great+Vibes&family=Outfit:wght@300;400;500;600;700&family=Playfair+Display:ital,wght@0,400;0,600;0,700;1,400&display=swap" rel="stylesheet">
 
-    <!-- Safe area inset for iPhone notch / Dynamic Island -->
     <style>
-      body { padding-top: env(safe-area-inset-top); padding-bottom: env(safe-area-inset-bottom); }
+      /* iOS black-translucent: body should NOT add padding-top — the
+         fixed headers in each staff page handle it with env() directly.
+         Only add bottom padding so the home indicator never hides content. */
+      body { padding-bottom: env(safe-area-inset-bottom, 0px); }
+
+      /* Utility: full-height minus status bar — for pages that center content */
+      .min-h-safe { min-height: calc(100vh - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px)); }
     </style>
   </head>
 

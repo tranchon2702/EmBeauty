@@ -18,10 +18,11 @@ const App = () => {
         closeButton
         duration={3500}
         gap={8}
-        offset={20}
+        offset={48}
         toastOptions={{
           style: {
             fontFamily: "'Outfit', system-ui, sans-serif",
+            marginBottom: "env(safe-area-inset-bottom, 0px)",
           },
         }}
       />

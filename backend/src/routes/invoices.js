@@ -3,6 +3,7 @@ import mongoose from 'mongoose';
 import Invoice from '../models/Invoice.js';
 import Customer from '../models/Customer.js';
 import Settings from '../models/Settings.js';
+import Employee from '../models/Employee.js';
 import { requireAuth, isAdmin } from '../middleware/auth.js';
 import { computeInvoiceTotals } from '../lib/invoiceTotals.js';
 import { vnToday, vnStartOfDay, vnEndOfDay, vnDateCompact } from '../lib/time.js';
@@ -17,12 +18,39 @@ const MAX_PAGE_SIZE = 200;
 const isValidId = (id) => mongoose.Types.ObjectId.isValid(id);
 const oid = (id) => new mongoose.Types.ObjectId(id);
 
-const normalizeEmployeeIds = (employeeIds, employeeId) => {
+const normalizeEmployeeIds = (employeeIds, employeeId, services) => {
+  // Global workers selected for the invoice.
   const candidates = Array.isArray(employeeIds) && employeeIds.length > 0
     ? employeeIds
     : [employeeId];
-  return [...new Set(candidates.map((id) => String(id || '')).filter(isValidId))];
+
+  // Also collect any per-service employee assignments.
+  const perServiceIds = Array.isArray(services)
+    ? services.map(s => s?.employeeId).filter(Boolean)
+    : [];
+
+  return [...new Set(
+    [...candidates, ...perServiceIds]
+      .map((id) => String(id || ''))
+      .filter(isValidId)
+  )];
 };
+
+const assertActiveWorkers = async (workerIds) => {
+  const count = await Employee.countDocuments({
+    _id: { $in: workerIds },
+    status: 'active',
+  });
+  if (count !== workerIds.length) {
+    throw new Error('Có nhân viên không tồn tại hoặc đã ngừng hoạt động');
+  }
+};
+
+const assignMissingLineWorkers = (services, fallbackEmployeeId) =>
+  services.map((service) => ({
+    ...service,
+    employeeId: service.employeeId || fallbackEmployeeId,
+  }));
 
 const employeeMatch = (employeeId) => {
   const id = oid(employeeId);
@@ -64,7 +92,8 @@ const nextInvoiceNumber = async () => {
 const POPULATE_LIST = [
   { path: 'employeeId', select: 'name avatar' },
   { path: 'employeeIds', select: 'name avatar' },
-  { path: 'bankAccountId', select: 'bankName accountNumber displayName' },
+  { path: 'bankAccountId', select: 'accountType bankId bankName accountNumber displayName' },
+  { path: 'services.employeeId', select: 'name avatar' },
 ];
 
 // ─── CREATE DRAFT INVOICE ────────────────────────────────────────────────────
@@ -75,14 +104,22 @@ router.post('/', async (req, res) => {
     discount, surcharge, surchargeNote, paymentMethod, bankAccountId, note,
   } = req.body;
 
-  const workers = normalizeEmployeeIds(employeeIds, employeeId);
+  let totals;
+  try {
+    totals = computeInvoiceTotals({ services, discount, surcharge });
+  } catch (err) {
+    return res.status(400).json({ message: err.message });
+  }
+
+  let workers = normalizeEmployeeIds(employeeIds, employeeId, totals.services);
   if (workers.length === 0) {
     return res.status(400).json({ message: 'Vui lòng chọn ít nhất một thợ thực hiện' });
   }
 
-  let totals;
+  totals.services = assignMissingLineWorkers(totals.services, workers[0]);
+  workers = normalizeEmployeeIds(workers, workers[0], totals.services);
   try {
-    totals = computeInvoiceTotals({ services, discount, surcharge });
+    await assertActiveWorkers(workers);
   } catch (err) {
     return res.status(400).json({ message: err.message });
   }
@@ -152,16 +189,24 @@ router.put('/:id', async (req, res) => {
     } catch (err) {
       return res.status(400).json({ message: err.message });
     }
-    Object.assign(invoice, totals);
-
-    if (employeeIds !== undefined || employeeId !== undefined) {
-      const workers = normalizeEmployeeIds(employeeIds, employeeId);
+    if (employeeIds !== undefined || employeeId !== undefined || services !== undefined) {
+      const requestedEmployeeIds = employeeIds !== undefined ? employeeIds : invoice.employeeIds;
+      const requestedPrimary = employeeId !== undefined ? employeeId : invoice.employeeId;
+      let workers = normalizeEmployeeIds(requestedEmployeeIds, requestedPrimary, totals.services);
       if (workers.length === 0) {
         return res.status(400).json({ message: 'Vui lòng chọn ít nhất một thợ thực hiện' });
+      }
+      totals.services = assignMissingLineWorkers(totals.services, workers[0]);
+      workers = normalizeEmployeeIds(workers, workers[0], totals.services);
+      try {
+        await assertActiveWorkers(workers);
+      } catch (err) {
+        return res.status(400).json({ message: err.message });
       }
       invoice.employeeId = workers[0];
       invoice.employeeIds = workers;
     }
+    Object.assign(invoice, totals);
     if (surchargeNote !== undefined) invoice.surchargeNote = String(surchargeNote).trim();
     if (note !== undefined) invoice.note = String(note).trim();
     if (customerPhone !== undefined) invoice.customerPhone = String(customerPhone).trim();
@@ -371,7 +416,25 @@ router.get('/stats/summary', async (req, res) => {
     const sumIf = (method) => ({
       $sum: { $cond: [{ $eq: ['$paymentMethod', method] }, '$totalAmount', 0] },
     });
-    const lineQty = { $ifNull: ['$services.quantity', 1] };
+    // When a report is scoped to one employee, service figures must include
+    // only the lines that employee actually performed — not every line on a
+    // multi-technician invoice. Legacy lines fall back to the primary worker.
+    const lineEmployeeScope = employeeId && isValidId(employeeId)
+      ? oid(employeeId)
+      : (!isAdmin(req) ? oid(req.user.id) : null);
+    const serviceLineStages = [
+      { $unwind: '$services' },
+      {
+        $set: {
+          effectiveLineEmployeeId: { $ifNull: ['$services.employeeId', '$employeeId'] },
+          lineQty: { $ifNull: ['$services.quantity', 1] },
+          lineRevenue: {
+            $multiply: ['$services.price', { $ifNull: ['$services.quantity', 1] }],
+          },
+        },
+      },
+      ...(lineEmployeeScope ? [{ $match: { effectiveLineEmployeeId: lineEmployeeScope } }] : []),
+    ];
 
     const [facets] = await Invoice.aggregate([
       { $match: paidMatch },
@@ -388,24 +451,25 @@ router.get('/stats/summary', async (req, res) => {
             },
           }],
           byEmployee: [
+            ...serviceLineStages,
             {
-              $set: {
-                effectiveEmployeeIds: {
-                  $cond: [
-                    { $gt: [{ $size: { $ifNull: ['$employeeIds', []] } }, 0] },
-                    '$employeeIds',
-                    ['$employeeId'],
-                  ],
+              $group: {
+                _id: { employeeId: '$effectiveLineEmployeeId', invoiceId: '$_id' },
+                amount: { $sum: '$lineRevenue' },
+                cash: {
+                  $sum: { $cond: [{ $eq: ['$paymentMethod', 'cash'] }, '$lineRevenue', 0] },
+                },
+                bank: {
+                  $sum: { $cond: [{ $eq: ['$paymentMethod', 'bank'] }, '$lineRevenue', 0] },
                 },
               },
             },
-            { $unwind: '$effectiveEmployeeIds' },
             {
               $group: {
-                _id: '$effectiveEmployeeIds',
-                amount: { $sum: '$totalAmount' },
-                cash: sumIf('cash'),
-                bank: sumIf('bank'),
+                _id: '$_id.employeeId',
+                amount: { $sum: '$amount' },
+                cash: { $sum: '$cash' },
+                bank: { $sum: '$bank' },
                 count: { $sum: 1 },
               },
             },
@@ -431,17 +495,27 @@ router.get('/stats/summary', async (req, res) => {
             { $sort: { amount: -1 } },
           ],
           byService: [
-            { $unwind: '$services' },
+            ...serviceLineStages,
             {
               $group: {
                 _id: '$services.name',
-                count: { $sum: lineQty },
-                revenue: { $sum: { $multiply: ['$services.price', lineQty] } },
+                count: { $sum: '$lineQty' },
+                revenue: { $sum: '$lineRevenue' },
               },
             },
             { $project: { _id: 0, name: '$_id', count: 1, revenue: 1 } },
             { $sort: { revenue: -1 } },
             { $limit: 30 },
+          ],
+          serviceTotals: [
+            ...serviceLineStages,
+            {
+              $group: {
+                _id: null,
+                serviceCount: { $sum: '$lineQty' },
+                serviceRevenue: { $sum: '$lineRevenue' },
+              },
+            },
           ],
         },
       },
@@ -450,6 +524,7 @@ router.get('/stats/summary', async (req, res) => {
     const totals = facets?.totals?.[0] || {
       totalRevenue: 0, cashRevenue: 0, bankRevenue: 0, totalPoints: 0, paidCount: 0,
     };
+    const serviceTotals = facets?.serviceTotals?.[0] || { serviceCount: 0, serviceRevenue: 0 };
 
     // Unsettled invoices have no paidAt, so they are counted by creation date.
     const [draftCount, cancelledCount] = await Promise.all([
@@ -466,6 +541,7 @@ router.get('/stats/summary', async (req, res) => {
       dateTo: req.query.dateTo || req.query.dateFrom || today,
       scope: isAdmin(req) ? 'all' : 'self',
       ...totals,
+      ...serviceTotals,
       avgTicket: totals.paidCount > 0 ? Math.round(totals.totalRevenue / totals.paidCount) : 0,
       draftCount,
       cancelledCount,
@@ -487,7 +563,8 @@ router.get('/:id', async (req, res) => {
     const invoice = await Invoice.findOne({ _id: id, ...visibilityFilter(req) })
       .populate('employeeId', 'name avatar')
       .populate('employeeIds', 'name avatar')
-      .populate('bankAccountId', 'bankName accountNumber accountHolder bankId displayName qrImageBase64');
+      .populate('services.employeeId', 'name avatar')
+      .populate('bankAccountId', 'accountType bankName accountNumber accountHolder bankId displayName qrImageBase64');
     if (!invoice) return res.status(404).json({ message: 'Hóa đơn không tồn tại' });
     res.json(invoice);
   } catch (error) {

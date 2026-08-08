@@ -36,9 +36,23 @@ const invoiceSchema = new mongoose.Schema({
   },
   services: [
     {
+      // Optional catalog link. Name and price remain snapshots so editing or
+      // deleting the catalog service never rewrites a historical invoice.
+      serviceId: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'Service',
+        default: null
+      },
       name: { type: String, required: true },
       price: { type: Number, required: true },
-      quantity: { type: Number, default: 1 }
+      quantity: { type: Number, default: 1 },
+      // Which technician performed this specific service line.
+      // Null means the primary technician (employeeId) did it.
+      employeeId: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'Employee',
+        default: null
+      }
     }
   ],
   // Every money field below is recomputed server-side from `services`.

@@ -18,11 +18,25 @@ const assertCategoryExists = async (key) => {
 };
 
 // ─── PUBLIC: list services ───────────────────────────────────────────────────
-// `?activeOnly=true` is what the customer-facing price list and the invoice
-// picker use, so a paused service disappears without being deleted.
+// `?context=menu`    → customer-facing price list (isActive + showOnMenu)
+// `?context=invoice` → staff invoice picker (isActive + showInInvoice)
+// `?activeOnly=true` → backward compat: isActive only
+// No filter          → admin view: all services including inactive
 router.get('/', async (req, res) => {
   try {
-    const filter = req.query.activeOnly === 'true' ? { isActive: { $ne: false } } : {};
+    let filter = {};
+    const { context, activeOnly } = req.query;
+
+    if (context === 'menu') {
+      // `$ne: false` keeps services created before the visibility flags were
+      // introduced visible. Only an explicit opt-out hides a legacy service.
+      filter = { isActive: { $ne: false }, showOnMenu: { $ne: false } };
+    } else if (context === 'invoice') {
+      filter = { isActive: { $ne: false }, showInInvoice: { $ne: false } };
+    } else if (activeOnly === 'true') {
+      filter = { isActive: { $ne: false } };
+    }
+
     const list = await Service.find(filter).sort({ category: 1, name: 1 });
     res.json(list);
   } catch (error) {
@@ -32,7 +46,7 @@ router.get('/', async (req, res) => {
 
 // ─── ADMIN: create ───────────────────────────────────────────────────────────
 router.post('/', requireAdmin, async (req, res) => {
-  const { name, price, category, description, isActive } = req.body;
+  const { name, price, category, description, isActive, showOnMenu, showInInvoice } = req.body;
 
   if (!name || !String(name).trim()) {
     return res.status(400).json({ message: 'Tên dịch vụ là bắt buộc' });
@@ -54,6 +68,8 @@ router.post('/', requireAdmin, async (req, res) => {
       category,
       description: (description || '').trim(),
       isActive: isActive !== undefined ? Boolean(isActive) : true,
+      showOnMenu: showOnMenu !== undefined ? Boolean(showOnMenu) : true,
+      showInInvoice: showInInvoice !== undefined ? Boolean(showInInvoice) : true,
     });
 
     await service.save();
@@ -65,7 +81,7 @@ router.post('/', requireAdmin, async (req, res) => {
 
 // ─── ADMIN: update ───────────────────────────────────────────────────────────
 router.put('/:id', requireAdmin, async (req, res) => {
-  const { name, price, category, description, isActive } = req.body;
+  const { name, price, category, description, isActive, showOnMenu, showInInvoice } = req.body;
 
   try {
     const service = await Service.findById(req.params.id);
@@ -86,6 +102,8 @@ router.put('/:id', requireAdmin, async (req, res) => {
     }
     if (description !== undefined) service.description = String(description).trim();
     if (isActive !== undefined) service.isActive = Boolean(isActive);
+    if (showOnMenu !== undefined) service.showOnMenu = Boolean(showOnMenu);
+    if (showInInvoice !== undefined) service.showInInvoice = Boolean(showInInvoice);
 
     await service.save();
     res.json(service);

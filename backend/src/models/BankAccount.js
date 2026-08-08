@@ -1,6 +1,12 @@
 import mongoose from 'mongoose';
 
 const bankAccountSchema = new mongoose.Schema({
+  // MoMo uses a static QR image while bank accounts use VietQR generation.
+  accountType: {
+    type: String,
+    enum: ['bank', 'momo'],
+    default: 'bank'
+  },
   // VietQR API identifier (e.g. "mbbank", "vietcombank")
   bankId: {
     type: String,
@@ -11,7 +17,7 @@ const bankAccountSchema = new mongoose.Schema({
     type: String,
     required: true
   },
-  // Account number
+  // Bank account number, or the phone number registered with MoMo.
   accountNumber: {
     type: String,
     required: true

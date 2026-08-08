@@ -16,7 +16,7 @@ export default defineConfig({
     react(),
     VitePWA({
       registerType: "autoUpdate",
-      includeAssets: ["favicon.svg", "icons/*.png"],
+      includeAssets: ["favicon.svg", "icons/*.png", "bank-logos/*.png", "payment-logos/*.png"],
       manifest: {
         name: "EM Beauty Nails & Makeup",
         short_name: "EM Beauty",
@@ -44,10 +44,12 @@ export default defineConfig({
         ],
       },
       workbox: {
-        // Cache API responses with NetworkFirst (fresh data preferred, fallback to cache)
+        // Cache only customer-safe catalog data. Never cache invoices, staff,
+        // customers or bank accounts: a shared iPhone/PWA must not show data
+        // left by a previous signed-in employee while offline.
         runtimeCaching: [
           {
-            urlPattern: /\/api\//,
+            urlPattern: /\/api\/(services|categories|settings)(?:\?|$)/,
             handler: "NetworkFirst",
             options: {
               cacheName: "api-cache",
@@ -73,4 +75,3 @@ export default defineConfig({
     },
   },
 });
-

@@ -4,6 +4,7 @@ import { LogOut, PlusCircle, BarChart3, Settings as SettingsIcon, ClipboardList,
 import { toast } from "sonner";
 import { API_BASE, authFetch, clearSession, getSession } from "../config";
 import { formatVnDateTime, vnToday } from "../lib/date";
+import { PaymentAccountLogo } from "../components/PaymentAccountLogo";
 
 interface SessionData {
   _id: string;
@@ -38,6 +39,13 @@ interface InvoiceData {
     _id: string;
     name: string;
   }>;
+  bankAccountId?: {
+    accountType?: "bank" | "momo";
+    bankId: string;
+    bankName: string;
+    displayName: string;
+    accountNumber: string;
+  } | null;
 }
 
 const EmployeeDashboard = () => {
@@ -245,9 +253,12 @@ const EmployeeDashboard = () => {
   };
 
   return (
-    <div className="min-h-screen bg-[#FDFBF7] pb-12">
+    <div className="min-h-screen bg-[#FDFBF7] overscroll-contain" style={{ paddingBottom: "env(safe-area-inset-bottom,0px)" }}>
       {/* Header bar */}
-      <div className="bg-[#9E5E6F] text-white py-4 px-6 flex items-center justify-between shadow-md">
+      <div
+        className="bg-[#9E5E6F] text-white px-6 flex items-center justify-between shadow-md sticky top-0 z-20"
+        style={{ paddingTop: "calc(env(safe-area-inset-top,0px) + 12px)", paddingBottom: "12px" }}
+      >
         <div>
           <h1 className="font-serif text-xl font-bold">EM Beauty Manager</h1>
           {session && (
@@ -403,7 +414,9 @@ const EmployeeDashboard = () => {
                     <div className="flex flex-col items-end gap-1.5 self-stretch md:self-auto justify-between md:justify-center border-t md:border-t-0 pt-3 md:pt-0 border-stone-100">
                       <span className="text-sm font-bold text-[#9E5E6F] font-serif">{formatPrice(inv.totalAmount)}</span>
                       <span className="text-[10px] text-stone-400">
-                        Thanh toán: <span className="font-bold">{inv.paymentMethod === "cash" ? "Tiền mặt" : "Chuyển khoản"}</span>
+                        Thanh toán: <span className="font-bold">
+                          {inv.paymentMethod === "cash" ? "Tiền mặt" : inv.bankAccountId?.accountType === "momo" ? "Ví MoMo" : "Chuyển khoản QR"}
+                        </span>
                       </span>
                       {inv.status === "paid" && inv.paidAt && (
                         <span className="text-[10px] text-emerald-600 font-semibold">
@@ -459,7 +472,21 @@ const EmployeeDashboard = () => {
               </div>
               <div className="flex justify-between">
                 <span className="text-stone-500">Hình thức thanh toán:</span>
-                <span className="font-bold text-[#9E5E6F]">{selectedInvoice.paymentMethod === "cash" ? "💵 Tiền mặt" : "🏦 Chuyển khoản QR"}</span>
+                <span className="font-bold text-[#9E5E6F] flex items-center gap-2">
+                  {selectedInvoice.paymentMethod === "cash" ? "💵 Tiền mặt" : (
+                    <>
+                      {selectedInvoice.bankAccountId && (
+                        <PaymentAccountLogo
+                          accountType={selectedInvoice.bankAccountId.accountType === "momo" ? "momo" : "bank"}
+                          bankId={selectedInvoice.bankAccountId.bankId}
+                          name={selectedInvoice.bankAccountId.bankName}
+                          className="w-7 h-7"
+                        />
+                      )}
+                      {selectedInvoice.bankAccountId?.accountType === "momo" ? "Ví MoMo" : "Chuyển khoản QR"}
+                    </>
+                  )}
+                </span>
               </div>
               {selectedInvoice.status === "paid" && selectedInvoice.paidAt && (
                 <div className="flex justify-between">

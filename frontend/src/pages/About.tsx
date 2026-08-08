@@ -48,7 +48,7 @@ const About = () => {
       try {
         const [catRes, srvRes] = await Promise.all([
           fetch(`${API_BASE}/categories`),
-          fetch(`${API_BASE}/services?activeOnly=true`),
+          fetch(`${API_BASE}/services?context=menu`),
         ]);
         if (catRes.ok) {
           const cats: CategoryItem[] = await catRes.json();

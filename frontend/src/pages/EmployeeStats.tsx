@@ -18,7 +18,12 @@ interface InvoiceData {
   paymentMethod: string;
   pointsEarned: number;
   status: string;
-  services: Array<{ name: string; price: number; quantity: number }>;
+  services: Array<{
+    name: string;
+    price: number;
+    quantity: number;
+    employeeId?: { _id: string; name: string; avatar?: string } | null;
+  }>;
   employeeId: {
     _id: string;
     name: string;
@@ -44,6 +49,8 @@ interface SummaryData {
   totalRevenue: number;
   cashRevenue: number;
   bankRevenue: number;
+  serviceRevenue: number;
+  serviceCount: number;
   totalPoints: number;
   paidCount: number;
   avgTicket: number;
@@ -58,7 +65,7 @@ interface SummaryData {
 }
 
 const EMPTY_SUMMARY: SummaryData = {
-  totalRevenue: 0, cashRevenue: 0, bankRevenue: 0, totalPoints: 0,
+  totalRevenue: 0, cashRevenue: 0, bankRevenue: 0, serviceRevenue: 0, serviceCount: 0, totalPoints: 0,
   paidCount: 0, avgTicket: 0, draftCount: 0, cancelledCount: 0,
   scope: "self", employeeStats: [], serviceStats: [],
 };
@@ -133,7 +140,17 @@ const EmployeeStats = () => {
         authFetch(`${API_BASE}/employees/list`),
       ]);
 
-      if (sumRes.ok) setStats(await sumRes.json());
+      if (sumRes.ok) {
+        const summary = await sumRes.json();
+        // Keep the page usable during rolling deployments where an older API
+        // may not return the newest aggregate fields yet.
+        setStats({
+          ...EMPTY_SUMMARY,
+          ...summary,
+          employeeStats: Array.isArray(summary.employeeStats) ? summary.employeeStats : [],
+          serviceStats: Array.isArray(summary.serviceStats) ? summary.serviceStats : [],
+        });
+      }
       if (invRes.ok) {
         const data = await invRes.json();
         setInvoices(data.items || []);
@@ -149,7 +166,7 @@ const EmployeeStats = () => {
 
   useEffect(() => { fetchData(); }, [dateFrom, dateTo, filterStatus, filterEmployee, filterPayment]);
 
-  const formatPrice = (p: number) => p.toLocaleString("vi-VN") + "đ";
+  const formatPrice = (p: number | undefined) => (Number(p) || 0).toLocaleString("vi-VN") + "đ";
   const getEmployeeNames = (invoice: InvoiceData) => {
     const names = invoice.employeeIds?.map((employee) => employee.name).filter(Boolean) || [];
     return names.length > 0 ? names.join(", ") : invoice.employeeId?.name || "Khác";
@@ -169,9 +186,12 @@ const EmployeeStats = () => {
   };
 
   return (
-    <div className="min-h-screen bg-[#FDFBF7] pb-12">
+    <div className="min-h-screen bg-[#FDFBF7] overscroll-contain">
       {/* ── Header ── */}
-      <div className="bg-[#9E5E6F] text-white py-4 px-5 flex items-center justify-between shadow-md sticky top-0 z-20">
+      <div
+        className="bg-[#9E5E6F] text-white px-5 flex items-center justify-between shadow-md sticky top-0 z-20"
+        style={{ paddingTop: "calc(env(safe-area-inset-top,0px) + 12px)", paddingBottom: "12px" }}
+      >
         <div className="flex items-center gap-3">
           <Link to="/employee/dashboard" className="p-1.5 hover:bg-white/15 rounded-full transition">
             <ArrowLeft className="w-5 h-5" />
@@ -288,12 +308,22 @@ const EmployeeStats = () => {
         ) : (
           <>
             {/* ══ OVERVIEW CARDS ════════════════════════════════════════════════ */}
-            <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+            <div className="grid grid-cols-2 lg:grid-cols-6 gap-3">
               {/* Total Revenue */}
-              <div className="col-span-2 md:col-span-1 bg-gradient-to-br from-[#9E5E6F] to-[#7D4050] text-white rounded-2xl p-4 shadow-md">
-                <p className="text-[10px] text-white/70 font-bold uppercase">Tổng Doanh Thu</p>
+              <div className="col-span-2 lg:col-span-1 bg-gradient-to-br from-[#9E5E6F] to-[#7D4050] text-white rounded-2xl p-4 shadow-md">
+                <p className="text-[10px] text-white/70 font-bold uppercase">Giá Trị Hóa Đơn</p>
                 <p className="text-xl font-extrabold font-serif mt-1">{formatPrice(stats.totalRevenue)}</p>
-                <p className="text-[10px] text-white/60 mt-1">{stats.paidCount} hóa đơn thanh toán</p>
+                <p className="text-[10px] text-white/60 mt-1">{stats.paidCount} hóa đơn liên quan đã thu</p>
+              </div>
+
+              {/* Exact service-line performance for the selected employee/scope */}
+              <div className="col-span-2 lg:col-span-1 bg-white rounded-2xl p-4 border border-[#E5B2C0]/50 shadow-sm">
+                <div className="flex items-center gap-1.5 mb-1">
+                  <ShoppingBag className="w-3.5 h-3.5 text-[#9E5E6F]" />
+                  <p className="text-[10px] text-stone-400 font-bold uppercase">Doanh Số Dịch Vụ</p>
+                </div>
+                <p className="text-lg font-extrabold text-[#9E5E6F] font-serif">{formatPrice(stats.serviceRevenue)}</p>
+                <p className="text-[10px] text-stone-400 mt-0.5">{stats.serviceCount} lượt dịch vụ thực hiện</p>
               </div>
 
               {/* Cash */}
@@ -349,10 +379,10 @@ const EmployeeStats = () => {
                 {/* Employee Performance */}
                 <div className="bg-white rounded-2xl p-5 border border-stone-200/60 shadow-sm space-y-4">
                   <h2 className="text-xs font-bold text-stone-400 uppercase tracking-wider flex items-center gap-2">
-                    <UserCheck className="w-4 h-4 text-[#9E5E6F]" /> Giá Trị Bill Theo Nhân Viên
+                    <UserCheck className="w-4 h-4 text-[#9E5E6F]" /> Doanh Số Dịch Vụ Theo Nhân Viên
                   </h2>
                   <p className="text-[10px] text-stone-400 leading-relaxed">
-                    Bill có nhiều thợ được ghi nhận cho từng người để đối chiếu khi tính %. Không cộng các dòng nhân viên để thay cho tổng doanh thu ở trên.
+                    Tính đúng các dòng dịch vụ được gán cho từng thợ, trước giảm giá/phụ thu. Một hóa đơn nhiều thợ không còn ghi toàn bộ bill cho từng người.
                   </p>
 
                   {stats.employeeStats.length === 0 ? (
@@ -362,7 +392,7 @@ const EmployeeStats = () => {
                       {stats.employeeStats.map((emp, idx) => {
                         const maxAmt = Math.max(...stats.employeeStats.map(e => e.amount), 1);
                         const pct = (emp.amount / maxAmt) * 100;
-                        const revPct = stats.totalRevenue > 0 ? Math.round((emp.amount / stats.totalRevenue) * 100) : 0;
+                        const revPct = stats.serviceRevenue > 0 ? Math.round((emp.amount / stats.serviceRevenue) * 100) : 0;
                         return (
                           <div key={emp.id} className="space-y-1.5">
                             <div className="flex items-center justify-between text-xs">
@@ -390,7 +420,7 @@ const EmployeeStats = () => {
 
                             {/* Details */}
                             <div className="flex justify-between text-[10px] text-stone-400 px-0.5">
-                              <span>{emp.count} đơn • {revPct}% doanh thu</span>
+                              <span>{emp.count} hóa đơn • {revPct}% doanh số dịch vụ</span>
                               <span className="flex gap-2">
                                 <span className="text-emerald-600">💵 {formatPrice(emp.cash)}</span>
                                 <span className="text-blue-600">🏦 {formatPrice(emp.bank)}</span>
@@ -492,6 +522,7 @@ const EmployeeStats = () => {
                                 {inv.services.slice(0, 4).map((s, i) => (
                                   <span key={i} className="text-[9px] bg-stone-100 text-stone-500 px-1.5 py-0.5 rounded-full">
                                     {s.name} {s.quantity > 1 ? `×${s.quantity}` : ""}
+                                    {s.employeeId?.name ? ` · ${s.employeeId.name.split(" ").pop()}` : ""}
                                   </span>
                                 ))}
                                 {inv.services.length > 4 && (

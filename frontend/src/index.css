@@ -79,7 +79,62 @@
   display: none;
 }
 
-/* Custom scrollbars */
+/* ═══════════════════════════════════════════════════════════════
+   iOS PWA — Safe Area & Touch Utilities
+   ═══════════════════════════════════════════════════════════════ */
+
+/* Remove tap highlight on buttons/links (iOS default = grey flash) */
+button, a, [role="button"] {
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation; /* faster tap — no 300ms delay */
+}
+
+/* Momentum scrolling for overflow-y containers */
+.scroll-momentum {
+  -webkit-overflow-scrolling: touch;
+  overflow-y: auto;
+}
+
+/* Safe-area padding utilities — use these instead of fixed px values
+   on headers/footers that sit at screen edges on iPhone. */
+.pt-safe    { padding-top:    env(safe-area-inset-top,    0px); }
+.pb-safe    { padding-bottom: env(safe-area-inset-bottom, 0px); }
+.pl-safe    { padding-left:   env(safe-area-inset-left,   0px); }
+.pr-safe    { padding-right:  env(safe-area-inset-right,  0px); }
+
+/* Compose with existing padding: e.g. a header needs 12px + safe top */
+.header-safe-pt { padding-top: calc(env(safe-area-inset-top, 0px) + 12px); }
+
+/* Bottom bar — sits above home indicator */
+.footer-safe-pb { padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 12px); }
+
+/* Fixed header height token — useful for offsetting scroll containers */
+:root {
+  --header-h: calc(env(safe-area-inset-top, 0px) + 57px);
+}
+
+/* Prevent iOS rubber-band on the whole page when not needed */
+html { overscroll-behavior: none; }
+
+/* Keep overscroll inside scrollable panels only */
+.overscroll-contain { overscroll-behavior: contain; }
+
+/* ─── Numpad button: larger tap target on mobile ─── */
+.numpad-btn {
+  min-height: 56px;
+  border-radius: 16px;
+  font-size: 1.125rem;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.1s, transform 0.1s;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+.numpad-btn:active { transform: scale(0.93); }
+
+
 ::-webkit-scrollbar {
   width: 6px;
 }

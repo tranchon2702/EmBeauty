@@ -3,6 +3,17 @@ const toInt = (value, fallback = 0) => {
   return Number.isFinite(n) ? n : fallback;
 };
 
+const optionalObjectId = (value, label) => {
+  const raw = value?._id ?? value;
+  if (raw === undefined || raw === null || raw === '') return null;
+
+  const id = String(raw);
+  if (!/^[a-f\d]{24}$/i.test(id)) {
+    throw new Error(`${label} không hợp lệ`);
+  }
+  return id;
+};
+
 /**
  * Derives every money field on an invoice from its line items.
  *
@@ -23,7 +34,10 @@ export const computeInvoiceTotals = ({ services, discount, surcharge }) => {
     if (price < 0) throw new Error(`Giá của "${name}" không hợp lệ`);
 
     const quantity = Math.max(1, toInt(item?.quantity, 1));
-    return { name, price, quantity };
+    const serviceId = optionalObjectId(item?.serviceId, 'Mã dịch vụ');
+    const employeeId = optionalObjectId(item?.employeeId, 'Mã nhân viên thực hiện');
+
+    return { serviceId, name, price, quantity, employeeId };
   });
 
   const subTotal = lines.reduce((sum, line) => sum + line.price * line.quantity, 0);

@@ -20,9 +20,18 @@ const serviceSchema = new mongoose.Schema({
     type: String,
     default: ''
   },
-  // Hides the service from the public price list and the invoice picker
-  // without deleting it, so the salon can pause an item seasonally.
+  // Master switch — false hides the service everywhere.
   isActive: {
+    type: Boolean,
+    default: true
+  },
+  // Show on the customer-facing price list (/about page).
+  showOnMenu: {
+    type: Boolean,
+    default: true
+  },
+  // Show in the staff invoice creation picker.
+  showInInvoice: {
     type: Boolean,
     default: true
   }
