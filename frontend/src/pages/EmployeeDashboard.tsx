@@ -1,9 +1,10 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { LogOut, PlusCircle, BarChart3, Settings as SettingsIcon, ClipboardList, CheckCircle, XCircle, AlertCircle, RefreshCw, KeyRound, Trash2 } from "lucide-react";
+import { LogOut, PlusCircle, BarChart3, Settings as SettingsIcon, ClipboardList, CheckCircle, XCircle, AlertCircle, RefreshCw, KeyRound, Trash2, UserRound, Camera, Save } from "lucide-react";
 import { toast } from "sonner";
 import { API_BASE, authFetch, clearSession, getSession } from "../config";
 import { formatVnDateTime, vnToday } from "../lib/date";
+import { compressAvatar } from "../lib/imageUtils";
 import { PaymentAccountLogo } from "../components/PaymentAccountLogo";
 import { InvoiceBreakdown } from "../components/InvoiceBreakdown";
 
@@ -11,6 +12,10 @@ interface SessionData {
   _id: string;
   name: string;
   role: string;
+  phone?: string;
+  avatar?: string;
+  bio?: string;
+  mustChangePin?: boolean;
 }
 
 interface StatsData {
@@ -72,6 +77,14 @@ const EmployeeDashboard = () => {
   const [loading, setLoading] = useState(true);
   const [selectedInvoice, setSelectedInvoice] = useState<InvoiceData | null>(null);
   const [updatingStatus, setUpdatingStatus] = useState(false);
+
+  // Personal profile modal
+  const profileImageRef = useRef<HTMLInputElement>(null);
+  const [showProfileModal, setShowProfileModal] = useState(false);
+  const [profileName, setProfileName] = useState("");
+  const [profileAvatar, setProfileAvatar] = useState("");
+  const [profileSaving, setProfileSaving] = useState(false);
+  const [profileImageLoading, setProfileImageLoading] = useState(false);
 
   // PIN change modal
   const [showPinModal, setShowPinModal] = useState(false);
@@ -182,6 +195,62 @@ const EmployeeDashboard = () => {
     clearSession();
     toast.success("Đã đăng xuất");
     navigate("/staff");
+  };
+
+  const openProfileModal = () => {
+    if (!session) return;
+    setProfileName(session.name);
+    setProfileAvatar(session.avatar || "");
+    setShowProfileModal(true);
+  };
+
+  const handleProfileImageChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+    if (!file.type.startsWith("image/")) {
+      toast.error("Vui lòng chọn một file ảnh");
+      return;
+    }
+
+    setProfileImageLoading(true);
+    try {
+      setProfileAvatar(await compressAvatar(file));
+    } catch {
+      toast.error("Không thể xử lý ảnh này, vui lòng chọn ảnh khác");
+    } finally {
+      setProfileImageLoading(false);
+    }
+  };
+
+  const saveOwnProfile = async () => {
+    if (!session) return;
+    const name = profileName.trim();
+    if (!name) {
+      toast.warning("Vui lòng nhập tên nhân viên");
+      return;
+    }
+
+    setProfileSaving(true);
+    try {
+      const res = await authFetch(`${API_BASE}/employees/${session._id}/profile`, {
+        method: "PATCH",
+        body: JSON.stringify({ name, avatar: profileAvatar }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.message);
+
+      const updatedSession = { ...session, ...data.user };
+      localStorage.setItem("embeauty_session", JSON.stringify(updatedSession));
+      setSession(updatedSession);
+      setShowProfileModal(false);
+      await fetchData();
+      toast.success(data.message || "Đã cập nhật hồ sơ cá nhân");
+    } catch (err: any) {
+      toast.error(err.message || "Không thể cập nhật hồ sơ");
+    } finally {
+      setProfileSaving(false);
+    }
   };
 
   // ── PIN Change handlers ──
@@ -352,6 +421,14 @@ const EmployeeDashboard = () => {
                 <span>Nhân Sự & Thiết Lập</span>
               </Link>
             )}
+
+            <button
+              onClick={openProfileModal}
+              className="flex items-center gap-3 p-3 hover:bg-[#F9ECEF] hover:text-[#9E5E6F] text-stone-700 rounded-xl transition font-medium text-xs w-full text-left"
+            >
+              <UserRound className="w-5 h-5 shrink-0" />
+              <span>Hồ Sơ Cá Nhân</span>
+            </button>
 
             <button
               onClick={() => setShowPinModal(true)}
@@ -559,6 +636,113 @@ const EmployeeDashboard = () => {
                   <Trash2 className="w-4 h-4" /> Xóa hóa đơn
                 </button>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Personal Profile Modal ── */}
+      {showProfileModal && session && (
+        <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl max-w-sm w-full p-6 shadow-2xl border border-stone-100 space-y-5">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <UserRound className="w-5 h-5 text-[#9E5E6F]" />
+                <h3 className="font-serif font-bold text-stone-900">Hồ Sơ Cá Nhân</h3>
+              </div>
+              <button
+                onClick={() => setShowProfileModal(false)}
+                disabled={profileSaving}
+                className="p-1 hover:bg-stone-100 rounded-full transition disabled:opacity-50"
+              >
+                <XCircle className="w-5 h-5 text-stone-400" />
+              </button>
+            </div>
+
+            <div className="flex flex-col items-center gap-3">
+              <button
+                type="button"
+                onClick={() => profileImageRef.current?.click()}
+                disabled={profileImageLoading || profileSaving}
+                className="relative w-28 h-28 rounded-full overflow-hidden bg-[#F9ECEF] border-4 border-white shadow-md group disabled:opacity-60"
+                title="Chọn ảnh đại diện"
+              >
+                {profileAvatar ? (
+                  <img src={profileAvatar} alt={profileName || session.name} className="w-full h-full object-cover" />
+                ) : (
+                  <span className="w-full h-full flex items-center justify-center text-3xl font-serif font-bold text-[#9E5E6F]">
+                    {(profileName || session.name).trim().charAt(0).toUpperCase()}
+                  </span>
+                )}
+                <span className="absolute inset-0 bg-black/45 text-white flex flex-col items-center justify-center gap-1 opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100 transition">
+                  <Camera className="w-5 h-5" />
+                  <span className="text-[10px] font-bold">Đổi ảnh</span>
+                </span>
+              </button>
+              <input
+                ref={profileImageRef}
+                type="file"
+                accept="image/jpeg,image/png,image/webp"
+                className="hidden"
+                onChange={handleProfileImageChange}
+              />
+              <div className="flex items-center gap-3 text-xs font-semibold">
+                <button
+                  type="button"
+                  onClick={() => profileImageRef.current?.click()}
+                  disabled={profileImageLoading || profileSaving}
+                  className="text-[#9E5E6F] hover:underline disabled:opacity-50"
+                >
+                  {profileImageLoading ? "Đang xử lý ảnh..." : "Chọn ảnh mới"}
+                </button>
+                {profileAvatar && (
+                  <button
+                    type="button"
+                    onClick={() => setProfileAvatar("")}
+                    disabled={profileSaving}
+                    className="text-stone-400 hover:text-red-600 disabled:opacity-50"
+                  >
+                    Xóa ảnh
+                  </button>
+                )}
+              </div>
+            </div>
+
+            <label className="block">
+              <span className="text-[11px] text-stone-500 font-bold block mb-1.5">Tên hiển thị</span>
+              <input
+                type="text"
+                value={profileName}
+                onChange={(event) => setProfileName(event.target.value)}
+                maxLength={80}
+                autoFocus
+                className="w-full rounded-xl border border-stone-200 px-3.5 py-3 text-sm font-semibold text-stone-800 outline-none focus:border-[#9E5E6F] focus:ring-2 focus:ring-[#9E5E6F]/15"
+                placeholder="Nhập tên của bạn"
+              />
+            </label>
+
+            <p className="text-[10px] leading-relaxed text-stone-400 bg-stone-50 rounded-xl px-3 py-2">
+              Bạn chỉ thay đổi được tên và ảnh của tài khoản đang đăng nhập. Quyền hạn và thông tin của nhân viên khác vẫn do quản trị viên quản lý.
+            </p>
+
+            <div className="flex gap-2 pt-1">
+              <button
+                type="button"
+                onClick={() => setShowProfileModal(false)}
+                disabled={profileSaving}
+                className="flex-1 py-2.5 rounded-xl bg-stone-100 text-stone-600 text-xs font-bold hover:bg-stone-200 transition disabled:opacity-50"
+              >
+                Hủy
+              </button>
+              <button
+                type="button"
+                onClick={saveOwnProfile}
+                disabled={profileSaving || profileImageLoading || !profileName.trim()}
+                className="flex-1 py-2.5 rounded-xl bg-[#9E5E6F] text-white text-xs font-bold hover:bg-[#8D5060] transition flex items-center justify-center gap-1.5 disabled:opacity-50"
+              >
+                <Save className="w-4 h-4" />
+                {profileSaving ? "Đang lưu..." : "Lưu thay đổi"}
+              </button>
             </div>
           </div>
         </div>

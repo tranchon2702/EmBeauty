@@ -141,6 +141,61 @@ router.patch('/:id/change-pin', requireAuth, async (req, res) => {
   }
 });
 
+// ─── AUTH: Update own profile (name and avatar) ──────────────────────────────
+router.patch('/:id/profile', requireAuth, async (req, res) => {
+  const { id } = req.params;
+  const { name, avatar } = req.body;
+
+  if (req.user.id !== id) {
+    return res.status(403).json({ message: 'Bạn chỉ có thể cập nhật hồ sơ của chính mình' });
+  }
+
+  const normalizedName = typeof name === 'string' ? name.trim() : '';
+  if (!normalizedName) {
+    return res.status(400).json({ message: 'Tên nhân viên không được để trống' });
+  }
+  if (normalizedName.length > 80) {
+    return res.status(400).json({ message: 'Tên nhân viên không được dài quá 80 ký tự' });
+  }
+  if (typeof avatar !== 'string') {
+    return res.status(400).json({ message: 'Dữ liệu ảnh không hợp lệ' });
+  }
+  if (avatar && !/^data:image\/(jpeg|png|webp);base64,/i.test(avatar)) {
+    return res.status(400).json({ message: 'Ảnh đại diện phải là ảnh JPEG, PNG hoặc WebP' });
+  }
+  // Client compresses avatars to 400x400 first. Keep a server-side ceiling too
+  // so a staff account cannot fill the database with oversized data URLs.
+  if (avatar.length > 1_500_000) {
+    return res.status(413).json({ message: 'Ảnh đại diện quá lớn, vui lòng chọn ảnh khác' });
+  }
+
+  try {
+    const employee = await Employee.findById(id);
+    if (!employee || employee.status !== 'active') {
+      return res.status(404).json({ message: 'Không tìm thấy nhân viên' });
+    }
+
+    employee.name = normalizedName;
+    employee.avatar = avatar;
+    await employee.save();
+
+    res.json({
+      message: 'Đã cập nhật hồ sơ cá nhân',
+      user: {
+        _id: employee._id,
+        name: employee.name,
+        role: employee.role,
+        phone: employee.phone,
+        avatar: employee.avatar || '',
+        bio: employee.bio || '',
+        mustChangePin: employee.mustChangePin || false
+      }
+    });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
 // ─── ADMIN: Reset PIN for any employee ───────────────────────────────────────
 router.patch('/:id/reset-pin', requireAdmin, async (req, res) => {
   const { id } = req.params;
