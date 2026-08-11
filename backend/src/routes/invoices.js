@@ -101,12 +101,12 @@ const POPULATE_LIST = [
 router.post('/', async (req, res) => {
   const {
     customerPhone, customerName, employeeId, employeeIds, services,
-    discount, surcharge, surchargeNote, paymentMethod, bankAccountId, note,
+    discount, discountType, discountValue, surcharge, surchargeNote, paymentMethod, bankAccountId, note,
   } = req.body;
 
   let totals;
   try {
-    totals = computeInvoiceTotals({ services, discount, surcharge });
+    totals = computeInvoiceTotals({ services, discount, discountType, discountValue, surcharge });
   } catch (err) {
     return res.status(400).json({ message: err.message });
   }
@@ -161,7 +161,7 @@ router.put('/:id', async (req, res) => {
   if (!isValidId(id)) return res.status(400).json({ message: 'Mã hóa đơn không hợp lệ' });
 
   const {
-    services, discount, surcharge, surchargeNote,
+    services, discount, discountType, discountValue, surcharge, surchargeNote,
     paymentMethod, bankAccountId, note, customerPhone, customerName, employeeId, employeeIds,
   } = req.body;
 
@@ -184,6 +184,14 @@ router.put('/:id', async (req, res) => {
       totals = computeInvoiceTotals({
         services: services !== undefined ? services : invoice.services,
         discount: discount !== undefined ? discount : invoice.discount,
+        discountType: discountType !== undefined ? discountType : invoice.discountType,
+        discountValue: discountValue !== undefined
+          ? discountValue
+          : discount !== undefined
+            ? discount
+            : invoice.discountType === 'percent'
+              ? invoice.discountValue
+              : invoice.discountValue || invoice.discount,
         surcharge: surcharge !== undefined ? surcharge : invoice.surcharge,
       });
     } catch (err) {

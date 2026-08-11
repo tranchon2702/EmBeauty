@@ -44,6 +44,10 @@ const invoiceSchema = new mongoose.Schema({
         default: null
       },
       name: { type: String, required: true },
+      // Catalog price at the moment this invoice was created. It never changes
+      // when an admin later edits the service catalog.
+      catalogPrice: { type: Number, default: null },
+      // Actual unit price charged on this invoice (customizable up or down).
       price: { type: Number, required: true },
       quantity: { type: Number, default: 1 },
       // Which technician performed this specific service line.
@@ -61,6 +65,17 @@ const invoiceSchema = new mongoose.Schema({
     default: 0
   },
   discount: {
+    type: Number,
+    default: 0
+  },
+  // Raw bill-level discount choice. `discount` above stores the derived VND
+  // amount so old reports and totals stay backwards compatible.
+  discountType: {
+    type: String,
+    enum: ['amount', 'percent'],
+    default: 'amount'
+  },
+  discountValue: {
     type: Number,
     default: 0
   },

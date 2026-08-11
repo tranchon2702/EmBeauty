@@ -2,12 +2,14 @@ import React, { useState, useEffect } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import {
   ArrowLeft, Calendar, TrendingUp, UserCheck, AlertCircle,
-  ShoppingBag, Filter, RefreshCw, Banknote, CreditCard, Lock, Trash2
+  ShoppingBag, Filter, RefreshCw, Banknote, CreditCard, Lock, Trash2, XCircle
 } from "lucide-react";
 import { toast } from "sonner";
 import { API_BASE, authFetch } from "../config";
 import { StyledSelect } from "../components/StyledSelect";
+import { PaymentAccountLogo } from "../components/PaymentAccountLogo";
 import { vnToday, vnDaysAgo, vnWeekStart, vnMonthStart, formatDayMonth, formatVnDateTime } from "../lib/date";
+import { InvoiceBreakdown } from "../components/InvoiceBreakdown";
 
 interface InvoiceData {
   _id: string;
@@ -15,11 +17,19 @@ interface InvoiceData {
   customerPhone: string;
   customerName: string;
   totalAmount: number;
+  subTotal?: number;
+  surcharge?: number;
+  surchargeNote?: string;
+  discount?: number;
+  discountType?: "amount" | "percent";
+  discountValue?: number;
+  note?: string;
   paymentMethod: string;
   pointsEarned: number;
   status: string;
   services: Array<{
     name: string;
+    catalogPrice?: number | null;
     price: number;
     quantity: number;
     employeeId?: { _id: string; name: string; avatar?: string } | null;
@@ -36,6 +46,12 @@ interface InvoiceData {
   }>;
   createdAt: string;
   paidAt: string | null;
+  bankAccountId?: {
+    accountType?: "bank" | "momo";
+    bankId?: string;
+    bankName?: string;
+    displayName?: string;
+  } | null;
 }
 
 interface Employee {
@@ -88,6 +104,7 @@ const EmployeeStats = () => {
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [loading, setLoading] = useState(true);
   const [isAdmin, setIsAdmin] = useState(false);
+  const [selectedInvoice, setSelectedInvoice] = useState<InvoiceData | null>(null);
 
   // Filters
   const [datePreset, setDatePreset] = useState<DatePreset>("today");
@@ -489,7 +506,11 @@ const EmployeeStats = () => {
                   ) : (
                     <div className="divide-y divide-stone-100 max-h-[600px] overflow-y-auto pr-1">
                       {invoices.map(inv => (
-                        <div key={inv._id} className="py-3 flex items-start justify-between gap-3 text-xs">
+                        <div
+                          key={inv._id}
+                          onClick={() => setSelectedInvoice(inv)}
+                          className="py-3 flex items-start justify-between gap-3 text-xs cursor-pointer rounded-xl px-2 hover:bg-stone-50 transition"
+                        >
                           <div className="space-y-1 min-w-0">
                             <div className="flex items-center gap-2 flex-wrap">
                               <span className="font-mono font-bold text-stone-800">{inv.invoiceNumber}</span>
@@ -522,7 +543,6 @@ const EmployeeStats = () => {
                                 {inv.services.slice(0, 4).map((s, i) => (
                                   <span key={i} className="text-[9px] bg-stone-100 text-stone-500 px-1.5 py-0.5 rounded-full">
                                     {s.name} {s.quantity > 1 ? `×${s.quantity}` : ""}
-                                    {s.employeeId?.name ? ` · ${s.employeeId.name.split(" ").pop()}` : ""}
                                   </span>
                                 ))}
                                 {inv.services.length > 4 && (
@@ -542,7 +562,7 @@ const EmployeeStats = () => {
                             {isAdmin && (
                               <button
                                 type="button"
-                                onClick={() => handleDeleteInvoice(inv)}
+                                onClick={(event) => { event.stopPropagation(); handleDeleteInvoice(inv); }}
                                 className="ml-auto mt-1 p-1.5 rounded-lg border border-red-100 bg-red-50 text-red-600 hover:bg-red-100 transition"
                                 title={`Xóa hóa đơn ${inv.invoiceNumber}`}
                                 aria-label={`Xóa hóa đơn ${inv.invoiceNumber}`}
@@ -561,6 +581,59 @@ const EmployeeStats = () => {
           </>
         )}
       </div>
+
+      {selectedInvoice && (
+        <div className="fixed inset-0 z-50 bg-black/55 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="w-full max-w-lg max-h-[90dvh] overflow-y-auto rounded-3xl bg-white p-5 shadow-2xl space-y-4">
+            <div className="flex items-start justify-between gap-3 border-b border-stone-100 pb-3">
+              <div>
+                <p className="text-[10px] font-bold uppercase tracking-wider text-stone-400">Chi tiết hóa đơn</p>
+                <h3 className="font-mono text-base font-bold text-stone-900">{selectedInvoice.invoiceNumber}</h3>
+                <p className="mt-1 text-[10px] text-stone-500">
+                  {selectedInvoice.customerName || selectedInvoice.customerPhone || "Khách vãng lai"} · {formatVnDateTime(selectedInvoice.status === "paid" && selectedInvoice.paidAt ? selectedInvoice.paidAt : selectedInvoice.createdAt)}
+                </p>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className={`rounded-full px-2 py-1 text-[9px] font-bold ${
+                  selectedInvoice.status === "paid"
+                    ? "bg-emerald-100 text-emerald-700"
+                    : selectedInvoice.status === "draft"
+                      ? "bg-amber-100 text-amber-700"
+                      : "bg-stone-100 text-stone-600"
+                }`}>
+                  {selectedInvoice.status === "paid" ? "Đã thanh toán" : selectedInvoice.status === "draft" ? "Bản nháp" : "Đã hủy"}
+                </span>
+                <button type="button" onClick={() => setSelectedInvoice(null)} className="rounded-full p-1 text-stone-400 hover:bg-stone-100" aria-label="Đóng chi tiết hóa đơn">
+                  <XCircle className="h-5 w-5" />
+                </button>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-between rounded-xl bg-stone-50 px-3 py-2 text-[10px]">
+              <span className="flex min-w-0 items-center gap-2 font-semibold text-stone-600">
+                {selectedInvoice.paymentMethod === "bank" && selectedInvoice.bankAccountId && (
+                  <PaymentAccountLogo
+                    accountType={selectedInvoice.bankAccountId.accountType === "momo" ? "momo" : "bank"}
+                    bankId={selectedInvoice.bankAccountId.bankId}
+                    name={selectedInvoice.bankAccountId.bankName || selectedInvoice.bankAccountId.displayName}
+                    className="h-6 w-6"
+                  />
+                )}
+                <span className="truncate">
+                  {selectedInvoice.paymentMethod === "bank"
+                    ? selectedInvoice.bankAccountId?.accountType === "momo"
+                      ? `Ví MoMo${selectedInvoice.bankAccountId.displayName ? ` · ${selectedInvoice.bankAccountId.displayName}` : ""}`
+                      : selectedInvoice.bankAccountId?.displayName || "Chuyển khoản QR"
+                    : "Tiền mặt"}
+                </span>
+              </span>
+              <span className="font-bold text-stone-700">{getEmployeeNames(selectedInvoice)}</span>
+            </div>
+
+            <InvoiceBreakdown invoice={selectedInvoice} />
+          </div>
+        </div>
+      )}
     </div>
   );
 };

@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import { API_BASE, authFetch, clearSession, getSession } from "../config";
 import { formatVnDateTime, vnToday } from "../lib/date";
 import { PaymentAccountLogo } from "../components/PaymentAccountLogo";
+import { InvoiceBreakdown } from "../components/InvoiceBreakdown";
 
 interface SessionData {
   _id: string;
@@ -26,7 +27,20 @@ interface InvoiceData {
   invoiceNumber: string;
   customerName: string;
   customerPhone: string;
-  services: Array<{ name: string; price: number; quantity?: number }>;
+  services: Array<{
+    name: string;
+    catalogPrice?: number | null;
+    price: number;
+    quantity?: number;
+    employeeId?: { _id?: string; name: string; avatar?: string } | null;
+  }>;
+  subTotal?: number;
+  surcharge?: number;
+  surchargeNote?: string;
+  discount?: number;
+  discountType?: "amount" | "percent";
+  discountValue?: number;
+  note?: string;
   totalAmount: number;
   paymentMethod: "cash" | "bank";
   status: "draft" | "paid" | "cancelled";
@@ -467,10 +481,6 @@ const EmployeeDashboard = () => {
                 <span className="font-bold text-stone-800">{selectedInvoice.customerName || "Khách vãng lai"} {selectedInvoice.customerPhone && `(${selectedInvoice.customerPhone})`}</span>
               </div>
               <div className="flex justify-between">
-                <span className="text-stone-500">Nhân viên thực hiện:</span>
-                <span className="font-bold text-stone-800 text-right">{getEmployeeNames(selectedInvoice)}</span>
-              </div>
-              <div className="flex justify-between">
                 <span className="text-stone-500">Hình thức thanh toán:</span>
                 <span className="font-bold text-[#9E5E6F] flex items-center gap-2">
                   {selectedInvoice.paymentMethod === "cash" ? "💵 Tiền mặt" : (
@@ -496,29 +506,7 @@ const EmployeeDashboard = () => {
               )}
             </div>
 
-            {/* Services list */}
-            <div>
-              <p className="text-[10px] font-bold text-stone-400 uppercase mb-2">Danh sách dịch vụ</p>
-              <div className="divide-y divide-stone-100 text-xs border border-stone-200 rounded-2xl overflow-hidden">
-                {selectedInvoice.services.map((s, idx) => (
-                  <div key={idx} className="p-3 flex justify-between items-center bg-white">
-                    <div>
-                      <p className="font-bold text-stone-800">{s.name}</p>
-                      <p className="text-[10px] text-stone-400 font-serif">{formatPrice(s.price)} x {s.quantity || 1}</p>
-                    </div>
-                    <span className="font-bold text-stone-900">{formatPrice(s.price * (s.quantity || 1))}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            {/* Total breakdown */}
-            <div className="pt-2 space-y-1.5 text-xs">
-              <div className="flex justify-between font-bold text-sm pt-2 border-t border-stone-200">
-                <span>Tổng tiền:</span>
-                <span className="text-base text-[#9E5E6F] font-serif font-extrabold">{formatPrice(selectedInvoice.totalAmount)}</span>
-              </div>
-            </div>
+            <InvoiceBreakdown invoice={selectedInvoice} />
 
             {/* Action buttons */}
             <div className="pt-3 border-t border-stone-100 flex flex-col sm:flex-row gap-2">
@@ -558,7 +546,7 @@ const EmployeeDashboard = () => {
                   onClick={() => setSelectedInvoice(null)}
                   className="w-full py-2.5 bg-stone-100 text-stone-700 rounded-xl font-bold text-xs hover:bg-stone-200 transition"
                 >
-                  Đóng Window
+                  Đóng
                 </button>
               )}
 

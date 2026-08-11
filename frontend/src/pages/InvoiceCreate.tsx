@@ -7,7 +7,9 @@ import {
 import { toast } from "sonner";
 import { API_BASE, authFetch } from "../config";
 import { PaymentAccountLogo } from "../components/PaymentAccountLogo";
+import { InvoiceBreakdown } from "../components/InvoiceBreakdown";
 import { matchesVietnameseSearch } from "../lib/search";
+import { formatVnd, formatVndInput, parseVndInput } from "../lib/money";
 
 interface ServiceItem {
   _id: string;
@@ -19,6 +21,7 @@ interface ServiceItem {
 interface SelectedItem {
   serviceId: string;
   name: string;
+  catalogPrice: number; // immutable catalog snapshot for discount display/history
   price: number;        // actual price for this invoice (may differ from catalog)
   quantity: number;
   employeeId: string;   // which technician performed this specific service
@@ -63,7 +66,8 @@ const InvoiceCreate = () => {
 
   const [surcharge, setSurcharge] = useState(0);
   const [surchargeNote, setSurchargeNote] = useState("");
-  const [discount, setDiscount] = useState(0);
+  const [discountType, setDiscountType] = useState<"amount" | "percent">("amount");
+  const [discountValue, setDiscountValue] = useState(0);
   const [invoiceNote, setInvoiceNote] = useState("");
 
   const [paymentMethod, setPaymentMethod] = useState<"cash" | "bank">("cash");
@@ -123,6 +127,7 @@ const InvoiceCreate = () => {
             setSelectedServices(inv.services.map((s: any) => ({
               serviceId: (typeof s.serviceId === "object" ? s.serviceId?._id : s.serviceId) || "",
               name: s.name,
+              catalogPrice: s.catalogPrice ?? s.price,
               price: s.price,
               quantity: s.quantity || 1,
               employeeId: (typeof s.employeeId === "object" ? s.employeeId?._id : s.employeeId) || workerIds[0] || "",
@@ -130,7 +135,11 @@ const InvoiceCreate = () => {
           }
           setSurcharge(inv.surcharge || 0);
           setSurchargeNote(inv.surchargeNote || "");
-          setDiscount(inv.discount || 0);
+          const restoredDiscountType = inv.discountType === "percent" ? "percent" : "amount";
+          setDiscountType(restoredDiscountType);
+          setDiscountValue(restoredDiscountType === "percent"
+            ? (inv.discountValue ?? 0)
+            : (inv.discountValue || inv.discount || 0));
           setInvoiceNote(inv.note || "");
           setPaymentMethod(inv.paymentMethod || "cash");
           if (inv.bankAccountId) {
@@ -183,7 +192,14 @@ const InvoiceCreate = () => {
 
   // ── Computed totals ───────────────────────────────────────────────────────
   const subTotal = selectedServices.reduce((s, i) => s + i.price * i.quantity, 0);
-  const totalAmount = Math.max(subTotal + surcharge - discount, 0);
+  const discountBase = subTotal + surcharge;
+  const normalizedDiscountValue = discountType === "percent"
+    ? Math.min(100, Math.max(0, discountValue))
+    : Math.min(discountBase, Math.max(0, discountValue));
+  const discount = discountType === "percent"
+    ? Math.round(discountBase * normalizedDiscountValue / 100)
+    : normalizedDiscountValue;
+  const totalAmount = Math.max(discountBase - discount, 0);
 
   // ── Search / filter services ──────────────────────────────────────────────
   const filteredServices = dbServices.filter(srv =>
@@ -208,6 +224,7 @@ const InvoiceCreate = () => {
       return [...prev, {
         serviceId: srv._id,
         name: srv.name,
+        catalogPrice: srv.price,
         price: srv.price,
         quantity: 1,
         employeeId: "",
@@ -263,18 +280,21 @@ const InvoiceCreate = () => {
       services: selectedServices.map(s => ({
         serviceId: s.serviceId || null,
         name: s.name,
+        catalogPrice: s.catalogPrice,
         price: s.price,
         quantity: s.quantity,
         employeeId: s.employeeId || null,
       })),
       discount,
+      discountType,
+      discountValue: normalizedDiscountValue,
       surcharge,
       surchargeNote,
       paymentMethod,
       bankAccountId: paymentMethod === "bank" ? selectedBankId || null : null,
       note: invoiceNote,
     };
-  }, [customerPhone, customerName, selectedServices, discount, surcharge, surchargeNote, paymentMethod, selectedBankId, invoiceNote]);
+  }, [customerPhone, customerName, selectedServices, discount, discountType, normalizedDiscountValue, surcharge, surchargeNote, paymentMethod, selectedBankId, invoiceNote]);
 
   const syncFromServer = (inv: any) => {
     const workerIds = Array.isArray(inv.employeeIds) && inv.employeeIds.length > 0
@@ -286,13 +306,18 @@ const InvoiceCreate = () => {
         return {
           serviceId,
           name: s.name,
+          catalogPrice: s.catalogPrice ?? s.price,
           price: s.price,
           quantity: s.quantity || 1,
           employeeId: (typeof s.employeeId === "object" ? s.employeeId?._id : s.employeeId) || workerIds[0] || "",
         };
       }));
     }
-    setDiscount(inv.discount || 0);
+    const restoredDiscountType = inv.discountType === "percent" ? "percent" : "amount";
+    setDiscountType(restoredDiscountType);
+    setDiscountValue(restoredDiscountType === "percent"
+      ? (inv.discountValue ?? 0)
+      : (inv.discountValue || inv.discount || 0));
     setSurcharge(inv.surcharge || 0);
   };
 
@@ -370,13 +395,7 @@ const InvoiceCreate = () => {
     return `https://img.vietqr.io/image/${bank.bankId}-${bank.accountNumber}-print.jpg?amount=${totalAmount}&addInfo=${desc}&accountName=${encodeURIComponent(bank.accountHolder)}`;
   };
 
-  const formatPrice = (p: number) => p.toLocaleString("vi-VN") + "đ";
-
-  const getEmpName = (empId: string) => {
-    const e = employees.find(x => x._id === empId);
-    if (!e) return "";
-    return e.name.split(" ").pop() || e.name;
-  };
+  const formatPrice = formatVnd;
 
   const getEmpInitials = (empId: string) => {
     const e = employees.find(x => x._id === empId);
@@ -387,6 +406,21 @@ const InvoiceCreate = () => {
   const invoiceEmployeeIds = [...new Set(selectedServices.map(service => service.employeeId).filter(Boolean))];
   const invoiceEmployees = employees.filter(employee => invoiceEmployeeIds.includes(employee._id));
   const unassignedServiceCount = selectedServices.filter(service => !service.employeeId).length;
+  const invoiceBreakdownData = {
+    services: selectedServices.map(service => ({
+      ...service,
+      employeeId: employees.find(employee => employee._id === service.employeeId) || null,
+    })),
+    subTotal,
+    surcharge,
+    surchargeNote,
+    discount,
+    discountType,
+    discountValue: normalizedDiscountValue,
+    totalAmount,
+    note: invoiceNote,
+    employeeId: invoiceEmployees[0] || null,
+  };
 
   // ─── RENDER ────────────────────────────────────────────────────────────────
   return (
@@ -510,17 +544,15 @@ const InvoiceCreate = () => {
                       {editingPriceIdx === idx ? (
                         <div className="flex items-center gap-1">
                           <input
-                            type="number"
-                            min={0}
+                            type="text"
                             inputMode="numeric"
                             pattern="[0-9]*"
                             enterKeyHint="done"
                             autoFocus
                             value={editingPriceVal}
-                            onChange={e => setEditingPriceVal(e.target.value)}
+                            onChange={e => setEditingPriceVal(formatVndInput(e.target.value))}
                             onBlur={() => {
-                              const p = parseInt(editingPriceVal, 10);
-                              setServicePrice(idx, isNaN(p) || p < 0 ? srv.price : p);
+                              setServicePrice(idx, editingPriceVal ? parseVndInput(editingPriceVal) : srv.price);
                               setEditingPriceIdx(null);
                               setEditingPriceVal("");
                             }}
@@ -534,13 +566,26 @@ const InvoiceCreate = () => {
                         </div>
                       ) : (
                         <button
-                          onClick={() => { setEditingPriceIdx(idx); setEditingPriceVal(String(srv.price)); }}
-                          className="flex items-center gap-1 group"
+                          onClick={() => { setEditingPriceIdx(idx); setEditingPriceVal(formatVndInput(srv.price)); }}
+                          className="flex flex-wrap items-center gap-1 group text-left"
                           title="Chạm để sửa giá"
                         >
+                          {srv.price < srv.catalogPrice && (
+                            <span className="text-[10px] text-stone-400 line-through font-serif">{formatPrice(srv.catalogPrice)}</span>
+                          )}
                           <span className="text-xs font-bold text-[#9E5E6F] font-serif">{formatPrice(srv.price)}</span>
+                          {srv.price < srv.catalogPrice && srv.catalogPrice > 0 && (
+                            <span className="rounded-full bg-emerald-50 px-1 py-0.5 text-[8px] font-bold text-emerald-700">
+                              -{Math.round((srv.catalogPrice - srv.price) / srv.catalogPrice * 10000) / 100}%
+                            </span>
+                          )}
                           <Edit3 className="w-2.5 h-2.5 text-stone-300 group-hover:text-[#9E5E6F] transition ml-0.5" />
                         </button>
+                      )}
+                      {editingPriceIdx !== idx && srv.price < srv.catalogPrice && (
+                        <p className="mt-0.5 text-[9px] font-semibold text-emerald-600">
+                          Giảm dòng {formatPrice((srv.catalogPrice - srv.price) * srv.quantity)}
+                        </p>
                       )}
                     </div>
 
@@ -646,10 +691,12 @@ const InvoiceCreate = () => {
               <div className="flex items-center gap-3">
                 <label className="text-[11px] text-stone-500 w-20 shrink-0">Phụ thu:</label>
                 <input
-                  type="number" min={0}
-                  value={surcharge || ""}
+                  type="text"
+                  inputMode="numeric"
+                  pattern="[0-9]*"
+                  value={formatVndInput(surcharge)}
                   placeholder="0"
-                  onChange={e => setSurcharge(Number(e.target.value))}
+                  onChange={e => setSurcharge(parseVndInput(e.target.value))}
                   className="flex-1 text-right bg-white border border-stone-200 rounded-xl px-3 py-2 text-xs font-semibold focus:outline-none focus:ring-1 focus:ring-[#9E5E6F]"
                 />
                 <span className="text-[11px] text-stone-400 shrink-0">đ</span>
@@ -663,17 +710,41 @@ const InvoiceCreate = () => {
                   className="w-full bg-white border border-stone-200 rounded-xl px-3 py-2 text-xs focus:outline-none"
                 />
               )}
-              <div className="flex items-center gap-3">
-                <label className="text-[11px] text-stone-500 w-20 shrink-0">Giảm giá:</label>
+              <div className="flex items-center gap-2">
+                <label className="text-[11px] text-stone-500 w-20 shrink-0">Giảm tổng:</label>
                 <input
-                  type="number" min={0}
-                  value={discount || ""}
+                  type="text"
+                  inputMode={discountType === "percent" ? "decimal" : "numeric"}
+                  value={discountType === "amount" ? formatVndInput(discountValue) : (discountValue || "")}
                   placeholder="0"
-                  onChange={e => setDiscount(Number(e.target.value))}
+                  onChange={e => {
+                    if (discountType === "amount") {
+                      setDiscountValue(parseVndInput(e.target.value));
+                    } else {
+                      const value = e.target.value.replace(/[^\d.]/g, "");
+                      setDiscountValue(Math.min(100, Number(value) || 0));
+                    }
+                  }}
                   className="flex-1 text-right bg-white border border-stone-200 rounded-xl px-3 py-2 text-xs font-semibold focus:outline-none focus:ring-1 focus:ring-[#9E5E6F]"
                 />
-                <span className="text-[11px] text-stone-400 shrink-0">đ</span>
+                <div className="flex rounded-lg border border-stone-200 bg-white p-0.5 shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => { setDiscountType("amount"); setDiscountValue(0); }}
+                    className={`rounded-md px-2 py-1 text-[9px] font-bold transition ${discountType === "amount" ? "bg-[#9E5E6F] text-white" : "text-stone-400"}`}
+                  >VND</button>
+                  <button
+                    type="button"
+                    onClick={() => { setDiscountType("percent"); setDiscountValue(0); }}
+                    className={`rounded-md px-2 py-1 text-[9px] font-bold transition ${discountType === "percent" ? "bg-[#9E5E6F] text-white" : "text-stone-400"}`}
+                  >%</button>
+                </div>
               </div>
+              {discount > 0 && (
+                <p className="text-right text-[9px] font-semibold text-emerald-600">
+                  Tổng bill được giảm {formatPrice(discount)}
+                </p>
+              )}
               <div className="flex items-center gap-2">
                 <StickyNote className="w-3.5 h-3.5 text-stone-400 shrink-0" />
                 <input
@@ -749,41 +820,7 @@ const InvoiceCreate = () => {
 
             <div className="p-5 space-y-4">
               {/* Invoice summary */}
-              <div className="bg-stone-50 rounded-xl p-3 text-xs space-y-1.5 border border-stone-100">
-                <div className="flex justify-between gap-3 pb-1.5 border-b border-stone-200">
-                  <span className="text-stone-500 shrink-0">Thợ thực hiện</span>
-                  <span className="font-semibold text-stone-800 text-right">
-                    {invoiceEmployees.map(employee => employee.name).join(", ")}
-                  </span>
-                </div>
-                {selectedServices.map((s, i) => (
-                  <div key={i} className="flex justify-between">
-                    <div className="min-w-0 flex-1">
-                      <span className="text-stone-600 truncate">{s.name} × {s.quantity}</span>
-                      {employees.length > 1 && s.employeeId && (
-                        <span className="text-[9px] text-stone-400 ml-1">({getEmpName(s.employeeId)})</span>
-                      )}
-                    </div>
-                    <span className="font-semibold shrink-0 ml-2">{formatPrice(s.price * s.quantity)}</span>
-                  </div>
-                ))}
-                {surcharge > 0 && (
-                  <div className="flex justify-between text-amber-700">
-                    <span>Phụ thu {surchargeNote && `(${surchargeNote})`}</span>
-                    <span className="font-semibold">+{formatPrice(surcharge)}</span>
-                  </div>
-                )}
-                {discount > 0 && (
-                  <div className="flex justify-between text-green-700">
-                    <span>Giảm giá</span>
-                    <span className="font-semibold">-{formatPrice(discount)}</span>
-                  </div>
-                )}
-                <div className="flex justify-between font-bold border-t border-stone-200 pt-1.5 text-stone-900">
-                  <span>Tổng cộng</span>
-                  <span className="text-primary font-sans tabular-nums">{formatPrice(totalAmount)}</span>
-                </div>
-              </div>
+              <InvoiceBreakdown invoice={invoiceBreakdownData} />
 
               {/* Payment method tabs */}
               <div className="flex gap-2">
