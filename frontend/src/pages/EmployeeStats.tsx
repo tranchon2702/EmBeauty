@@ -185,8 +185,14 @@ const EmployeeStats = () => {
 
   const formatPrice = (p: number | undefined) => (Number(p) || 0).toLocaleString("vi-VN") + "đ";
   const getEmployeeNames = (invoice: InvoiceData) => {
-    const names = invoice.employeeIds?.map((employee) => employee.name).filter(Boolean) || [];
-    return names.length > 0 ? names.join(", ") : invoice.employeeId?.name || "Khác";
+    const primaryName = invoice.employeeId?.name || "Khác";
+    const supportNames = invoice.employeeIds
+      ?.filter(employee => employee._id !== invoice.employeeId?._id && employee.name !== primaryName)
+      .map(employee => employee.name)
+      .filter(Boolean) || [];
+    return supportNames.length > 0
+      ? `${primaryName} (hỗ trợ: ${supportNames.join(", ")})`
+      : primaryName;
   };
 
   const handleDeleteInvoice = async (invoice: InvoiceData) => {
@@ -328,9 +334,14 @@ const EmployeeStats = () => {
             <div className="grid grid-cols-2 lg:grid-cols-6 gap-3">
               {/* Total Revenue */}
               <div className="col-span-2 lg:col-span-1 bg-gradient-to-br from-[#9E5E6F] to-[#7D4050] text-white rounded-2xl p-4 shadow-md">
-                <p className="text-[10px] text-white/70 font-bold uppercase">Giá Trị Hóa Đơn</p>
+                <p className="text-[10px] text-white/70 font-bold uppercase">
+                  {stats.scope === "self" || filterEmployee !== "all" ? "Doanh Thu Được Tính" : "Giá Trị Hóa Đơn"}
+                </p>
                 <p className="text-xl font-extrabold font-serif mt-1">{formatPrice(stats.totalRevenue)}</p>
-                <p className="text-[10px] text-white/60 mt-1">{stats.paidCount} hóa đơn liên quan đã thu</p>
+                <p className="text-[10px] text-white/60 mt-1">
+                  {stats.paidCount} hóa đơn đã thu
+                  {(stats.scope === "self" || filterEmployee !== "all") && " · đã tách phần hỗ trợ"}
+                </p>
               </div>
 
               {/* Exact service-line performance for the selected employee/scope */}
@@ -399,7 +410,7 @@ const EmployeeStats = () => {
                     <UserCheck className="w-4 h-4 text-[#9E5E6F]" /> Doanh Số Dịch Vụ Theo Nhân Viên
                   </h2>
                   <p className="text-[10px] text-stone-400 leading-relaxed">
-                    Tính đúng các dòng dịch vụ được gán cho từng thợ, trước giảm giá/phụ thu. Một hóa đơn nhiều thợ không còn ghi toàn bộ bill cho từng người.
+                    Bill thuộc nhân viên chính; doanh số của người hỗ trợ chỉ tính đúng các dịch vụ được giao. Phần giảm tổng/phụ thu còn lại thuộc nhân viên chính.
                   </p>
 
                   {stats.employeeStats.length === 0 ? (

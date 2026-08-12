@@ -44,8 +44,8 @@ export const computeInvoiceTotals = ({
     const price = toInt(item?.price);
     if (price < 0) throw new Error(`Giá của "${name}" không hợp lệ`);
 
-    // Keep the catalog price as an immutable invoice snapshot. `price` is the
-    // actual unit price on this invoice and may be either lower or higher.
+    // Keep the reference/quoted price snapshot supplied for this invoice.
+    // `price` is the final unit price actually charged.
     const catalogPrice = toInt(item?.catalogPrice ?? item?.defaultPrice ?? item?.price);
     if (catalogPrice < 0) throw new Error(`Giá niêm yết của "${name}" không hợp lệ`);
 

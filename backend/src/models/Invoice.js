@@ -44,8 +44,9 @@ const invoiceSchema = new mongoose.Schema({
         default: null
       },
       name: { type: String, required: true },
-      // Catalog price at the moment this invoice was created. It never changes
-      // when an admin later edits the service catalog.
+      // Reference/quoted price for this invoice. It starts from the catalog but
+      // may move up when a custom quote is entered, allowing a later reduction
+      // to be displayed clearly (for example 600k struck through to 500k).
       catalogPrice: { type: Number, default: null },
       // Actual unit price charged on this invoice (customizable up or down).
       price: { type: Number, required: true },

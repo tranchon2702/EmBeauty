@@ -19,10 +19,10 @@ const isValidId = (id) => mongoose.Types.ObjectId.isValid(id);
 const oid = (id) => new mongoose.Types.ObjectId(id);
 
 const normalizeEmployeeIds = (employeeIds, employeeId, services) => {
-  // Global workers selected for the invoice.
-  const candidates = Array.isArray(employeeIds) && employeeIds.length > 0
-    ? employeeIds
-    : [employeeId];
+  // Always keep the primary worker first. Previously a non-empty employeeIds
+  // array could silently replace employeeId with whichever service worker was
+  // listed first, making A's bill become B's bill.
+  const candidates = [employeeId, ...(Array.isArray(employeeIds) ? employeeIds : [])];
 
   // Also collect any per-service employee assignments.
   const perServiceIds = Array.isArray(services)
@@ -111,7 +111,12 @@ router.post('/', async (req, res) => {
     return res.status(400).json({ message: err.message });
   }
 
-  let workers = normalizeEmployeeIds(employeeIds, employeeId, totals.services);
+  // A staff-created invoice belongs to the signed-in staff member. Admins may
+  // still explicitly create one on behalf of another employee.
+  const primaryEmployeeId = isAdmin(req) && isValidId(employeeId)
+    ? String(employeeId)
+    : req.user.id;
+  let workers = normalizeEmployeeIds(employeeIds, primaryEmployeeId, totals.services);
   if (workers.length === 0) {
     return res.status(400).json({ message: 'Vui lòng chọn ít nhất một thợ thực hiện' });
   }
@@ -199,7 +204,15 @@ router.put('/:id', async (req, res) => {
     }
     if (employeeIds !== undefined || employeeId !== undefined || services !== undefined) {
       const requestedEmployeeIds = employeeIds !== undefined ? employeeIds : invoice.employeeIds;
-      const requestedPrimary = employeeId !== undefined ? employeeId : invoice.employeeId;
+      // Staff cannot accidentally transfer ownership while editing a draft.
+      // If this is an older draft created before ownership was enforced, its
+      // creator is corrected to primary on the next edit. An admin can still
+      // intentionally change the primary employee.
+      const requestedPrimary = isAdmin(req) && employeeId !== undefined
+        ? employeeId
+        : invoice.createdBy?.toString() === req.user.id
+          ? req.user.id
+          : invoice.employeeId;
       let workers = normalizeEmployeeIds(requestedEmployeeIds, requestedPrimary, totals.services);
       if (workers.length === 0) {
         return res.status(400).json({ message: 'Vui lòng chọn ít nhất một thợ thực hiện' });
@@ -444,40 +457,211 @@ router.get('/stats/summary', async (req, res) => {
       ...(lineEmployeeScope ? [{ $match: { effectiveLineEmployeeId: lineEmployeeScope } }] : []),
     ];
 
+    // Attribute the settled bill exactly once across employees:
+    // - supporting employees receive the services explicitly assigned to them;
+    // - the primary employee receives the remaining bill total, so bill-level
+    //   discounts/surcharges stay with the owner instead of being duplicated;
+    // - if an unusually large bill discount is lower than supporting services,
+    //   the available total is shared proportionally and nobody goes negative.
+    const employeeAttributionStages = [
+      {
+        $set: {
+          supportingGross: {
+            $reduce: {
+              input: { $ifNull: ['$services', []] },
+              initialValue: 0,
+              in: {
+                $let: {
+                  vars: {
+                    lineEmployeeId: { $ifNull: ['$$this.employeeId', '$employeeId'] },
+                    lineGross: {
+                      $multiply: [
+                        { $ifNull: ['$$this.price', 0] },
+                        { $ifNull: ['$$this.quantity', 1] },
+                      ],
+                    },
+                  },
+                  in: {
+                    $cond: [
+                      { $ne: ['$$lineEmployeeId', '$employeeId'] },
+                      { $add: ['$$value', '$$lineGross'] },
+                      '$$value',
+                    ],
+                  },
+                },
+              },
+            },
+          },
+          // The zero-value placeholder guarantees the primary owner still gets
+          // a group when every service line was delegated to someone else.
+          attributionServices: {
+            $concatArrays: [
+              { $ifNull: ['$services', []] },
+              [{ employeeId: null, price: 0, quantity: 1 }],
+            ],
+          },
+        },
+      },
+      {
+        $set: {
+          // Sum the supporting employees after any extreme bill-level discount.
+          // Each supporting line is floored to whole VND and the tiny rounding
+          // remainder stays with the primary owner, keeping the grand total
+          // exact even with several supporting employees.
+          supportingAllocatedTotal: {
+            $reduce: {
+              input: { $ifNull: ['$services', []] },
+              initialValue: 0,
+              in: {
+                $let: {
+                  vars: {
+                    lineEmployeeId: { $ifNull: ['$$this.employeeId', '$employeeId'] },
+                    lineGross: {
+                      $multiply: [
+                        { $ifNull: ['$$this.price', 0] },
+                        { $ifNull: ['$$this.quantity', 1] },
+                      ],
+                    },
+                  },
+                  in: {
+                    $cond: [
+                      { $ne: ['$$lineEmployeeId', '$employeeId'] },
+                      {
+                        $add: [
+                          '$$value',
+                          {
+                            $cond: [
+                              { $gt: ['$supportingGross', '$totalAmount'] },
+                              {
+                                $floor: {
+                                  $multiply: [
+                                    '$$lineGross',
+                                    { $divide: ['$totalAmount', '$supportingGross'] },
+                                  ],
+                                },
+                              },
+                              '$$lineGross',
+                            ],
+                          },
+                        ],
+                      },
+                      '$$value',
+                    ],
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+      { $unwind: '$attributionServices' },
+      {
+        $set: {
+          attributionEmployeeId: { $ifNull: ['$attributionServices.employeeId', '$employeeId'] },
+          attributionLineAmount: {
+            $let: {
+              vars: {
+                lineEmployeeId: { $ifNull: ['$attributionServices.employeeId', '$employeeId'] },
+                lineGross: {
+                  $multiply: [
+                    { $ifNull: ['$attributionServices.price', 0] },
+                    { $ifNull: ['$attributionServices.quantity', 1] },
+                  ],
+                },
+              },
+              in: {
+                $cond: [
+                  {
+                    $and: [
+                      { $ne: ['$$lineEmployeeId', '$employeeId'] },
+                      { $gt: ['$supportingGross', '$totalAmount'] },
+                    ],
+                  },
+                  {
+                    $floor: {
+                      $multiply: [
+                        '$$lineGross',
+                        { $divide: ['$totalAmount', '$supportingGross'] },
+                      ],
+                    },
+                  },
+                  '$$lineGross',
+                ],
+              },
+            },
+          },
+        },
+      },
+      {
+        $group: {
+          _id: { employeeId: '$attributionEmployeeId', invoiceId: '$_id' },
+          allocatedLines: { $sum: '$attributionLineAmount' },
+          invoiceTotal: { $first: '$totalAmount' },
+          supportingAllocatedTotal: { $first: '$supportingAllocatedTotal' },
+          primaryEmployeeId: { $first: '$employeeId' },
+          paymentMethod: { $first: '$paymentMethod' },
+        },
+      },
+      {
+        $set: {
+          amount: {
+            $cond: [
+              { $eq: ['$_id.employeeId', '$primaryEmployeeId'] },
+              { $max: [{ $subtract: ['$invoiceTotal', '$supportingAllocatedTotal'] }, 0] },
+              '$allocatedLines',
+            ],
+          },
+        },
+      },
+    ];
+
+    const fullInvoiceTotalsStages = [{
+      $group: {
+        _id: null,
+        totalRevenue: { $sum: '$totalAmount' },
+        cashRevenue: sumIf('cash'),
+        bankRevenue: sumIf('bank'),
+        totalPoints: { $sum: '$pointsEarned' },
+        paidCount: { $sum: 1 },
+      },
+    }];
+    const attributedTotalsStages = [
+      ...employeeAttributionStages,
+      { $match: { '_id.employeeId': lineEmployeeScope } },
+      {
+        $group: {
+          _id: null,
+          totalRevenue: { $sum: '$amount' },
+          cashRevenue: {
+            $sum: { $cond: [{ $eq: ['$paymentMethod', 'cash'] }, '$amount', 0] },
+          },
+          bankRevenue: {
+            $sum: { $cond: [{ $eq: ['$paymentMethod', 'bank'] }, '$amount', 0] },
+          },
+          totalPoints: { $sum: 0 },
+          paidCount: { $sum: 1 },
+        },
+      },
+    ];
+
     const [facets] = await Invoice.aggregate([
       { $match: paidMatch },
       {
         $facet: {
-          totals: [{
-            $group: {
-              _id: null,
-              totalRevenue: { $sum: '$totalAmount' },
-              cashRevenue: sumIf('cash'),
-              bankRevenue: sumIf('bank'),
-              totalPoints: { $sum: '$pointsEarned' },
-              paidCount: { $sum: 1 },
-            },
-          }],
+          totals: lineEmployeeScope ? attributedTotalsStages : fullInvoiceTotalsStages,
           byEmployee: [
-            ...serviceLineStages,
-            {
-              $group: {
-                _id: { employeeId: '$effectiveLineEmployeeId', invoiceId: '$_id' },
-                amount: { $sum: '$lineRevenue' },
-                cash: {
-                  $sum: { $cond: [{ $eq: ['$paymentMethod', 'cash'] }, '$lineRevenue', 0] },
-                },
-                bank: {
-                  $sum: { $cond: [{ $eq: ['$paymentMethod', 'bank'] }, '$lineRevenue', 0] },
-                },
-              },
-            },
+            ...employeeAttributionStages,
+            ...(lineEmployeeScope ? [{ $match: { '_id.employeeId': lineEmployeeScope } }] : []),
             {
               $group: {
                 _id: '$_id.employeeId',
                 amount: { $sum: '$amount' },
-                cash: { $sum: '$cash' },
-                bank: { $sum: '$bank' },
+                cash: {
+                  $sum: { $cond: [{ $eq: ['$paymentMethod', 'cash'] }, '$amount', 0] },
+                },
+                bank: {
+                  $sum: { $cond: [{ $eq: ['$paymentMethod', 'bank'] }, '$amount', 0] },
+                },
                 count: { $sum: 1 },
               },
             },

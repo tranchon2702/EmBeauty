@@ -52,6 +52,7 @@ interface InvoiceData {
   createdAt: string;
   paidAt: string | null;
   employeeId: {
+    _id?: string;
     name: string;
   };
   employeeIds?: Array<{
@@ -331,8 +332,14 @@ const EmployeeDashboard = () => {
   };
 
   const getEmployeeNames = (invoice: InvoiceData) => {
-    const names = invoice.employeeIds?.map((employee) => employee.name).filter(Boolean) || [];
-    return names.length > 0 ? names.join(", ") : invoice.employeeId?.name || "Hệ thống";
+    const primaryName = invoice.employeeId?.name || "Hệ thống";
+    const supportNames = invoice.employeeIds
+      ?.filter(employee => employee._id !== invoice.employeeId?._id && employee.name !== primaryName)
+      .map(employee => employee.name)
+      .filter(Boolean) || [];
+    return supportNames.length > 0
+      ? `${primaryName} (hỗ trợ: ${supportNames.join(", ")})`
+      : primaryName;
   };
 
   return (

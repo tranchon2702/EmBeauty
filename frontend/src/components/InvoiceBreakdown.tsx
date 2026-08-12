@@ -62,14 +62,20 @@ export const InvoiceBreakdown: React.FC<InvoiceBreakdownProps> = ({ invoice, cla
     employee: InvoiceEmployeeRef | null;
     name: string;
     services: string[];
+    amount: number;
+    isPrimary: boolean;
   }>();
+  const primaryId = invoice.employeeId?._id;
+  const primaryName = invoice.employeeId?.name || "Chưa xác định";
 
   invoice.services.forEach(service => {
     const employee = resolveEmployee(service.employeeId, invoice.employeeId);
     const name = employee?.name || "Chưa xác định";
     const key = employee?._id || `name:${name}`;
-    const assignment = assignments.get(key) || { employee, name, services: [] };
+    const isPrimary = primaryId ? employee?._id === primaryId : name === primaryName;
+    const assignment = assignments.get(key) || { employee, name, services: [], amount: 0, isPrimary };
     assignment.services.push(`${service.name}${(service.quantity || 1) > 1 ? ` ×${service.quantity}` : ""}`);
+    assignment.amount += service.price * (service.quantity || 1);
     assignments.set(key, assignment);
   });
 
@@ -120,9 +126,17 @@ export const InvoiceBreakdown: React.FC<InvoiceBreakdownProps> = ({ invoice, cla
       </div>
 
       <div className="rounded-2xl border border-[#E5B2C0] bg-[#F9ECEF]/55 p-3">
-        <div className="mb-2 flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wide text-[#9E5E6F]">
-          <UserCheck className="h-3.5 w-3.5" /> Phân công thực hiện
+        <div className="mb-1 flex flex-wrap items-center justify-between gap-1.5 text-[10px] font-bold uppercase tracking-wide text-[#9E5E6F]">
+          <span className="flex items-center gap-1.5">
+            <UserCheck className="h-3.5 w-3.5" /> Phân công thực hiện
+          </span>
+          <span className="normal-case tracking-normal text-stone-600">
+            Bill chính: {primaryName}
+          </span>
         </div>
+        <p className="mb-2 text-[9px] leading-relaxed text-stone-500">
+          Toàn bộ bill mặc định thuộc nhân viên chính; các dịch vụ nhân viên khác hỗ trợ được tách riêng bên dưới.
+        </p>
         <div className="space-y-1.5 text-[10px]">
           {[...assignments.entries()].map(([key, assignment]) => (
             <div key={key} className="flex items-start gap-2">
@@ -135,9 +149,19 @@ export const InvoiceBreakdown: React.FC<InvoiceBreakdownProps> = ({ invoice, cla
                   />
                 ) : assignment.name.split(" ").slice(-2).map(part => part[0]).join("").toUpperCase()}
               </div>
-              <div className="min-w-0 pt-0.5">
-                <span className="font-bold text-stone-700">{assignment.name}: </span>
-                <span className="text-stone-600">{assignment.services.join(", ")}</span>
+              <div className="min-w-0 flex-1 pt-0.5">
+                <div className="flex flex-wrap items-center gap-1">
+                  <span className="font-bold text-stone-700">{assignment.name}</span>
+                  <span className={`rounded-full px-1.5 py-0.5 text-[8px] font-bold ${
+                    assignment.isPrimary
+                      ? "bg-[#9E5E6F] text-white"
+                      : "bg-amber-100 text-amber-700"
+                  }`}>
+                    {assignment.isPrimary ? "Nhân viên chính" : "Hỗ trợ"}
+                  </span>
+                  <span className="ml-auto font-bold text-stone-700">{formatVnd(assignment.amount)}</span>
+                </div>
+                <p className="mt-0.5 text-stone-600">{assignment.services.join(", ")}</p>
               </div>
             </div>
           ))}
@@ -146,7 +170,7 @@ export const InvoiceBreakdown: React.FC<InvoiceBreakdownProps> = ({ invoice, cla
 
       <div className="rounded-2xl bg-stone-50 p-3 text-[11px] space-y-1.5 border border-stone-100">
         <div className="flex justify-between text-stone-500">
-          <span>Giá niêm yết</span><span>{formatVnd(catalogTotal)}</span>
+          <span>Giá gốc / giá đã báo</span><span>{formatVnd(catalogTotal)}</span>
         </div>
         {lineIncreaseTotal > 0 && (
           <div className="flex justify-between text-amber-700">

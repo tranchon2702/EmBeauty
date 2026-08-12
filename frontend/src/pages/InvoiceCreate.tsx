@@ -21,7 +21,10 @@ interface ServiceItem {
 interface SelectedItem {
   serviceId: string;
   name: string;
-  catalogPrice: number; // immutable catalog snapshot for discount display/history
+  // Reference/quoted price for this invoice. It starts from the service list
+  // price, but moves up when the salon quotes a higher price so a later
+  // reduction can be shown as "600k → 500k" correctly.
+  catalogPrice: number;
   price: number;        // actual price for this invoice (may differ from catalog)
   quantity: number;
   employeeId: string;   // which technician performed this specific service
@@ -49,6 +52,20 @@ type InvoiceStatus = "idle" | "draft" | "paid";
 
 const InvoiceCreate = () => {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const editId = searchParams.get("id");
+
+  const [sessionEmployee] = useState<Employee | null>(() => {
+    const raw = localStorage.getItem("embeauty_session");
+    if (!raw) return null;
+    try {
+      const parsed = JSON.parse(raw);
+      return parsed?._id && parsed?.name ? parsed : null;
+    } catch {
+      return null;
+    }
+  });
+  const currentEmployeeId = sessionEmployee?._id || "";
 
   // Data from DB
   const [dbServices, setDbServices] = useState<ServiceItem[]>([]);
@@ -63,6 +80,7 @@ const InvoiceCreate = () => {
   const [isNewCustomer, setIsNewCustomer] = useState(false);
 
   const [selectedServices, setSelectedServices] = useState<SelectedItem[]>([]);
+  const [primaryEmployeeId, setPrimaryEmployeeId] = useState(currentEmployeeId);
 
   const [surcharge, setSurcharge] = useState(0);
   const [surchargeNote, setSurchargeNote] = useState("");
@@ -99,13 +117,11 @@ const InvoiceCreate = () => {
 
   // ── Session check ──────────────────────────────────────────────────────────
   useEffect(() => {
-    const raw = localStorage.getItem("embeauty_session");
-    if (!raw) { toast.error("Vui lòng đăng nhập"); navigate("/staff"); return; }
-    try { JSON.parse(raw); } catch { navigate("/staff"); }
-  }, [navigate]);
-
-  const [searchParams] = useSearchParams();
-  const editId = searchParams.get("id");
+    if (!sessionEmployee) {
+      toast.error("Vui lòng đăng nhập");
+      navigate("/staff");
+    }
+  }, [navigate, sessionEmployee]);
 
   // ── Load existing draft if param ?id=... ─────────────────────────────────
   useEffect(() => {
@@ -120,6 +136,11 @@ const InvoiceCreate = () => {
           setInvoiceStatus(inv.status);
           setCustomerPhone(inv.customerPhone || "");
           setCustomerName(inv.customerName || "");
+          const creatorId = typeof inv.createdBy === "object" ? inv.createdBy?._id : inv.createdBy;
+          const primaryId = (creatorId === currentEmployeeId ? currentEmployeeId : null)
+            || (typeof inv.employeeId === "object" ? inv.employeeId?._id : inv.employeeId)
+            || currentEmployeeId;
+          setPrimaryEmployeeId(primaryId);
           const workerIds = Array.isArray(inv.employeeIds) && inv.employeeIds.length > 0
             ? inv.employeeIds.map((e: any) => typeof e === "object" ? e._id : e)
             : inv.employeeId ? [typeof inv.employeeId === "object" ? inv.employeeId._id : inv.employeeId] : [];
@@ -130,7 +151,7 @@ const InvoiceCreate = () => {
               catalogPrice: s.catalogPrice ?? s.price,
               price: s.price,
               quantity: s.quantity || 1,
-              employeeId: (typeof s.employeeId === "object" ? s.employeeId?._id : s.employeeId) || workerIds[0] || "",
+              employeeId: (typeof s.employeeId === "object" ? s.employeeId?._id : s.employeeId) || primaryId || workerIds[0] || "",
             })));
           }
           setSurcharge(inv.surcharge || 0);
@@ -152,7 +173,7 @@ const InvoiceCreate = () => {
       }
     };
     loadDraft();
-  }, [editId]);
+  }, [editId, currentEmployeeId]);
 
   // ── Load data ──────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -227,7 +248,7 @@ const InvoiceCreate = () => {
         catalogPrice: srv.price,
         price: srv.price,
         quantity: 1,
-        employeeId: "",
+        employeeId: primaryEmployeeId || currentEmployeeId,
       }];
     });
     setSearchQuery("");
@@ -265,15 +286,30 @@ const InvoiceCreate = () => {
 
   const setServicePrice = (idx: number, price: number) => {
     setSelectedServices(prev => {
-      const copy = [...prev]; copy[idx].price = Math.max(0, price); return copy;
+      const copy = [...prev];
+      const nextPrice = Math.max(0, price);
+      copy[idx] = {
+        ...copy[idx],
+        price: nextPrice,
+        // A higher edit becomes the new quoted/reference price. A lower edit
+        // keeps that reference so the UI can strike it out as a real discount.
+        catalogPrice: Math.max(copy[idx].catalogPrice, nextPrice),
+      };
+      return copy;
     });
   };
 
   // ── Build invoice payload ─────────────────────────────────────────────────
   const buildPayload = useCallback(() => {
-    const employeeIds = [...new Set(selectedServices.map(service => service.employeeId).filter(Boolean))];
+    const primaryId = primaryEmployeeId || currentEmployeeId
+      || selectedServices.find(service => service.employeeId)?.employeeId
+      || "";
+    const employeeIds = [...new Set([
+      primaryId,
+      ...selectedServices.map(service => service.employeeId),
+    ].filter(Boolean))];
     return {
-      employeeId: employeeIds[0],
+      employeeId: primaryId,
       employeeIds,
       customerPhone: customerPhone.trim(),
       customerName: customerName.trim(),
@@ -294,9 +330,13 @@ const InvoiceCreate = () => {
       bankAccountId: paymentMethod === "bank" ? selectedBankId || null : null,
       note: invoiceNote,
     };
-  }, [customerPhone, customerName, selectedServices, discount, discountType, normalizedDiscountValue, surcharge, surchargeNote, paymentMethod, selectedBankId, invoiceNote]);
+  }, [customerPhone, customerName, selectedServices, discount, discountType, normalizedDiscountValue, surcharge, surchargeNote, paymentMethod, selectedBankId, invoiceNote, primaryEmployeeId, currentEmployeeId]);
 
   const syncFromServer = (inv: any) => {
+    const primaryId = (typeof inv.employeeId === "object" ? inv.employeeId?._id : inv.employeeId)
+      || primaryEmployeeId
+      || currentEmployeeId;
+    setPrimaryEmployeeId(primaryId);
     const workerIds = Array.isArray(inv.employeeIds) && inv.employeeIds.length > 0
       ? inv.employeeIds.map((employee: any) => typeof employee === "object" ? employee._id : employee)
       : inv.employeeId ? [typeof inv.employeeId === "object" ? inv.employeeId._id : inv.employeeId] : [];
@@ -309,7 +349,7 @@ const InvoiceCreate = () => {
           catalogPrice: s.catalogPrice ?? s.price,
           price: s.price,
           quantity: s.quantity || 1,
-          employeeId: (typeof s.employeeId === "object" ? s.employeeId?._id : s.employeeId) || workerIds[0] || "",
+          employeeId: (typeof s.employeeId === "object" ? s.employeeId?._id : s.employeeId) || primaryId || workerIds[0] || "",
         };
       }));
     }
@@ -405,6 +445,8 @@ const InvoiceCreate = () => {
 
   const invoiceEmployeeIds = [...new Set(selectedServices.map(service => service.employeeId).filter(Boolean))];
   const invoiceEmployees = employees.filter(employee => invoiceEmployeeIds.includes(employee._id));
+  const primaryEmployee = employees.find(employee => employee._id === primaryEmployeeId)
+    || (sessionEmployee?._id === primaryEmployeeId ? sessionEmployee : null);
   const unassignedServiceCount = selectedServices.filter(service => !service.employeeId).length;
   const invoiceBreakdownData = {
     services: selectedServices.map(service => ({
@@ -419,7 +461,7 @@ const InvoiceCreate = () => {
     discountValue: normalizedDiscountValue,
     totalAmount,
     note: invoiceNote,
-    employeeId: invoiceEmployees[0] || null,
+    employeeId: primaryEmployee || invoiceEmployees[0] || null,
   };
 
   // ─── RENDER ────────────────────────────────────────────────────────────────
@@ -520,6 +562,16 @@ const InvoiceCreate = () => {
               </p>
             </div>
 
+            {primaryEmployee && (
+              <div className="flex items-center gap-2 border-b border-stone-100 bg-white px-3 py-2 text-[10px] text-stone-500">
+                <UserCheck className="h-3.5 w-3.5 shrink-0 text-[#9E5E6F]" />
+                <p className="min-w-0 leading-relaxed">
+                  Bill chính của <span className="font-bold text-[#9E5E6F]">{primaryEmployee.name}</span>.
+                  <span className="hidden min-[360px]:inline"> Dịch vụ mới tự động gán cho nhân viên này; chỉ đổi những dịch vụ người khác hỗ trợ.</span>
+                </p>
+              </div>
+            )}
+
             {/* Items */}
             <div className="divide-y divide-stone-50">
               {selectedServices.map((srv, idx) => (
@@ -538,9 +590,9 @@ const InvoiceCreate = () => {
                   </div>
 
                   {/* Row 2: price (editable) + qty controls + subtotal */}
-                  <div className="flex items-center gap-2">
+                  <div className="flex flex-wrap items-center gap-2">
                     {/* Editable price */}
-                    <div className="flex-1 min-w-0">
+                    <div className="min-w-[108px] flex-1">
                       {editingPriceIdx === idx ? (
                         <div className="flex items-center gap-1">
                           <input
@@ -560,7 +612,7 @@ const InvoiceCreate = () => {
                               if (e.key === "Enter") (e.target as HTMLInputElement).blur();
                               if (e.key === "Escape") { setEditingPriceIdx(null); setEditingPriceVal(""); }
                             }}
-                            className="w-24 px-2 py-1 text-xs font-bold bg-amber-50 border border-amber-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-amber-400 text-amber-800"
+                            className="min-w-0 w-24 max-w-full px-2 py-1 text-xs font-bold bg-amber-50 border border-amber-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-amber-400 text-amber-800"
                           />
                           <span className="text-[10px] text-stone-400">đ</span>
                         </div>
@@ -612,7 +664,7 @@ const InvoiceCreate = () => {
                     </div>
 
                     {/* Subtotal */}
-                    <span className="text-xs font-bold text-stone-700 shrink-0 min-w-[60px] text-right">
+                    <span className="ml-auto text-xs font-bold text-stone-700 shrink-0 min-w-[60px] text-right">
                       = {formatPrice(srv.price * srv.quantity)}
                     </span>
                   </div>
@@ -640,7 +692,9 @@ const InvoiceCreate = () => {
                                 ) : getEmpInitials(assignedEmployee._id)}
                               </div>
                               <div className="flex-1 min-w-0">
-                                <p className="text-[9px] text-stone-400 leading-none mb-0.5">Nhân viên thực hiện</p>
+                                <p className="text-[9px] text-stone-400 leading-none mb-0.5">
+                                  {assignedEmployee._id === primaryEmployeeId ? "Nhân viên chính · mặc định" : "Nhân viên hỗ trợ dịch vụ này"}
+                                </p>
                                 <p className="text-[11px] font-bold text-stone-700 truncate">{assignedEmployee.name}</p>
                               </div>
                             </>
@@ -688,8 +742,8 @@ const InvoiceCreate = () => {
 
             {/* Surcharge / Discount / Note */}
             <div className="px-4 py-3 border-t border-stone-100 space-y-2.5 bg-stone-50/50">
-              <div className="flex items-center gap-3">
-                <label className="text-[11px] text-stone-500 w-20 shrink-0">Phụ thu:</label>
+              <div className="grid grid-cols-[72px_minmax(0,1fr)] items-center gap-2">
+                <label className="text-[11px] text-stone-500">Phụ thu:</label>
                 <input
                   type="text"
                   inputMode="numeric"
@@ -697,9 +751,8 @@ const InvoiceCreate = () => {
                   value={formatVndInput(surcharge)}
                   placeholder="0"
                   onChange={e => setSurcharge(parseVndInput(e.target.value))}
-                  className="flex-1 text-right bg-white border border-stone-200 rounded-xl px-3 py-2 text-xs font-semibold focus:outline-none focus:ring-1 focus:ring-[#9E5E6F]"
+                  className="min-w-0 w-full text-right tabular-nums bg-white border border-stone-200 rounded-xl px-3 py-2 text-xs font-semibold focus:outline-none focus:ring-1 focus:ring-[#9E5E6F]"
                 />
-                <span className="text-[11px] text-stone-400 shrink-0">đ</span>
               </div>
               {surcharge > 0 && (
                 <input
@@ -710,34 +763,36 @@ const InvoiceCreate = () => {
                   className="w-full bg-white border border-stone-200 rounded-xl px-3 py-2 text-xs focus:outline-none"
                 />
               )}
-              <div className="flex items-center gap-2">
-                <label className="text-[11px] text-stone-500 w-20 shrink-0">Giảm tổng:</label>
-                <input
-                  type="text"
-                  inputMode={discountType === "percent" ? "decimal" : "numeric"}
-                  value={discountType === "amount" ? formatVndInput(discountValue) : (discountValue || "")}
-                  placeholder="0"
-                  onChange={e => {
-                    if (discountType === "amount") {
-                      setDiscountValue(parseVndInput(e.target.value));
-                    } else {
-                      const value = e.target.value.replace(/[^\d.]/g, "");
-                      setDiscountValue(Math.min(100, Number(value) || 0));
-                    }
-                  }}
-                  className="flex-1 text-right bg-white border border-stone-200 rounded-xl px-3 py-2 text-xs font-semibold focus:outline-none focus:ring-1 focus:ring-[#9E5E6F]"
-                />
-                <div className="flex rounded-lg border border-stone-200 bg-white p-0.5 shrink-0">
-                  <button
-                    type="button"
-                    onClick={() => { setDiscountType("amount"); setDiscountValue(0); }}
-                    className={`rounded-md px-2 py-1 text-[9px] font-bold transition ${discountType === "amount" ? "bg-[#9E5E6F] text-white" : "text-stone-400"}`}
-                  >VND</button>
-                  <button
-                    type="button"
-                    onClick={() => { setDiscountType("percent"); setDiscountValue(0); }}
-                    className={`rounded-md px-2 py-1 text-[9px] font-bold transition ${discountType === "percent" ? "bg-[#9E5E6F] text-white" : "text-stone-400"}`}
-                  >%</button>
+              <div className="grid grid-cols-[72px_minmax(0,1fr)] items-center gap-2">
+                <label className="text-[11px] text-stone-500">Giảm tổng:</label>
+                <div className="flex min-w-0 items-stretch gap-2">
+                  <input
+                    type="text"
+                    inputMode={discountType === "percent" ? "decimal" : "numeric"}
+                    value={discountType === "amount" ? formatVndInput(discountValue) : (discountValue || "")}
+                    placeholder="0"
+                    onChange={e => {
+                      if (discountType === "amount") {
+                        setDiscountValue(parseVndInput(e.target.value));
+                      } else {
+                        const value = e.target.value.replace(/[^\d.]/g, "");
+                        setDiscountValue(Math.min(100, Number(value) || 0));
+                      }
+                    }}
+                    className="min-w-0 w-full text-right tabular-nums bg-white border border-stone-200 rounded-xl px-2.5 py-2 text-xs font-semibold focus:outline-none focus:ring-1 focus:ring-[#9E5E6F]"
+                  />
+                  <div className="grid w-[68px] shrink-0 grid-cols-2 rounded-xl border border-stone-200 bg-white p-0.5">
+                    <button
+                      type="button"
+                      onClick={() => { setDiscountType("amount"); setDiscountValue(0); }}
+                      className={`min-h-8 rounded-lg px-1 text-[9px] font-bold transition ${discountType === "amount" ? "bg-[#9E5E6F] text-white" : "text-stone-400"}`}
+                    >VND</button>
+                    <button
+                      type="button"
+                      onClick={() => { setDiscountType("percent"); setDiscountValue(0); }}
+                      className={`min-h-8 rounded-lg px-1 text-[10px] font-bold transition ${discountType === "percent" ? "bg-[#9E5E6F] text-white" : "text-stone-400"}`}
+                    >%</button>
+                  </div>
                 </div>
               </div>
               {discount > 0 && (
