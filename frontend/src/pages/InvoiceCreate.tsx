@@ -106,6 +106,8 @@ const InvoiceCreate = () => {
   // ── Price editing per-item ─────────────────────────────────────────────────
   const [editingPriceIdx, setEditingPriceIdx] = useState<number | null>(null);
   const [editingPriceVal, setEditingPriceVal] = useState<string>("");
+  const [recentServiceId, setRecentServiceId] = useState("");
+  const newestServiceRef = useRef<HTMLDivElement>(null);
 
   // ── Qty editing ───────────────────────────────────────────────────────────
   const [editingQtyIdx, setEditingQtyIdx] = useState<number | null>(null);
@@ -211,6 +213,20 @@ const InvoiceCreate = () => {
     return () => document.removeEventListener("mousedown", handler);
   }, []);
 
+  // Bring the item the user just selected into a comfortable editing position.
+  // The highlight fades by itself after price/quantity/worker are easy to spot.
+  useEffect(() => {
+    if (!recentServiceId) return;
+    const frame = window.requestAnimationFrame(() => {
+      newestServiceRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+    });
+    const timer = window.setTimeout(() => setRecentServiceId(""), 1600);
+    return () => {
+      window.cancelAnimationFrame(frame);
+      window.clearTimeout(timer);
+    };
+  }, [recentServiceId]);
+
   // ── Computed totals ───────────────────────────────────────────────────────
   const subTotal = selectedServices.reduce((s, i) => s + i.price * i.quantity, 0);
   const discountBase = subTotal + surcharge;
@@ -235,22 +251,32 @@ const InvoiceCreate = () => {
 
   // ── Service list management ───────────────────────────────────────────────
   const addService = (srv: ServiceItem) => {
+    // Reordering changes row indexes, so close any row-level editor first to
+    // prevent an open price/quantity/employee control from jumping rows.
+    setEditingPriceIdx(null);
+    setEditingPriceVal("");
+    setEditingQtyIdx(null);
+    setEditingQtyVal("");
+    setEmployeePickerIdx(null);
+
     setSelectedServices(prev => {
       const idx = prev.findIndex(i => i.serviceId === srv._id);
       if (idx > -1) {
-        const copy = [...prev];
-        copy[idx].quantity += 1;
-        return copy;
+        const existing = { ...prev[idx], quantity: prev[idx].quantity + 1 };
+        // Selecting an existing service again both increases its quantity and
+        // moves it to the top, matching the same "just selected" behaviour.
+        return [existing, ...prev.filter((_, currentIdx) => currentIdx !== idx)];
       }
-      return [...prev, {
+      return [{
         serviceId: srv._id,
         name: srv.name,
         catalogPrice: srv.price,
         price: srv.price,
         quantity: 1,
         employeeId: primaryEmployeeId || currentEmployeeId,
-      }];
+      }, ...prev];
     });
+    setRecentServiceId(srv._id);
     setSearchQuery("");
     setSearchOpen(false);
   };
@@ -575,11 +601,24 @@ const InvoiceCreate = () => {
             {/* Items */}
             <div className="divide-y divide-stone-50">
               {selectedServices.map((srv, idx) => (
-                <div key={idx} className="px-3 py-3 space-y-2">
+                <div
+                  key={srv.serviceId || `${srv.name}-${idx}`}
+                  ref={idx === 0 ? newestServiceRef : undefined}
+                  className={`px-3 py-3 space-y-2 transition-colors duration-500 ${
+                    recentServiceId === srv.serviceId ? "bg-amber-50/80" : "bg-white"
+                  }`}
+                >
                   {/* Row 1: name + remove */}
                   <div className="flex items-start gap-2">
                     <div className="flex-1 min-w-0">
-                      <p className="text-xs font-semibold text-stone-800">{srv.name}</p>
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <p className="text-xs font-semibold text-stone-800">{srv.name}</p>
+                        {recentServiceId === srv.serviceId && (
+                          <span className="rounded-full bg-amber-100 px-1.5 py-0.5 text-[8px] font-bold text-amber-700">
+                            Vừa thêm · ở trên cùng
+                          </span>
+                        )}
+                      </div>
                     </div>
                     <button
                       onClick={() => removeService(idx)}
