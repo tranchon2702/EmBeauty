@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, useRef } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import {
   ArrowLeft, Trash2, Plus, Minus, QrCode,
-  CheckCircle2, Edit3, StickyNote, Search, X, ChevronDown, UserCheck
+  CheckCircle2, Edit3, StickyNote, Search, X, UserCheck
 } from "lucide-react";
 import { toast } from "sonner";
 import { API_BASE, authFetch } from "../config";
@@ -21,13 +21,19 @@ interface ServiceItem {
 interface SelectedItem {
   serviceId: string;
   name: string;
-  // Reference/quoted price for this invoice. It starts from the service list
-  // price, but moves up when the salon quotes a higher price so a later
-  // reduction can be shown as "600k → 500k" correctly.
   catalogPrice: number;
-  price: number;        // actual price for this invoice (may differ from catalog)
+  price: number;
   quantity: number;
-  employeeId: string;   // which technician performed this specific service
+  employeeId: string;
+}
+
+interface ServiceEditDraft {
+  index: number;
+  name: string;
+  catalogPrice: number;
+  price: string;
+  quantity: string;
+  employeeId: string;
 }
 
 interface BankAccount {
@@ -103,16 +109,10 @@ const InvoiceCreate = () => {
   const searchInputRef = useRef<HTMLInputElement>(null);
   const searchContainerRef = useRef<HTMLDivElement>(null);
 
-  // ── Price editing per-item ─────────────────────────────────────────────────
-  const [editingPriceIdx, setEditingPriceIdx] = useState<number | null>(null);
-  const [editingPriceVal, setEditingPriceVal] = useState<string>("");
+  // ── Service editing modal ──────────────────────────────────────────────────
+  const [serviceEdit, setServiceEdit] = useState<ServiceEditDraft | null>(null);
   const [recentServiceId, setRecentServiceId] = useState("");
   const newestServiceRef = useRef<HTMLDivElement>(null);
-
-  // ── Qty editing ───────────────────────────────────────────────────────────
-  const [editingQtyIdx, setEditingQtyIdx] = useState<number | null>(null);
-  const [editingQtyVal, setEditingQtyVal] = useState<string>("");
-  const [employeePickerIdx, setEmployeePickerIdx] = useState<number | null>(null);
 
   // ── Payment modal ─────────────────────────────────────────────────────────
   const [showPayModal, setShowPayModal] = useState(false);
@@ -251,13 +251,7 @@ const InvoiceCreate = () => {
 
   // ── Service list management ───────────────────────────────────────────────
   const addService = (srv: ServiceItem) => {
-    // Reordering changes row indexes, so close any row-level editor first to
-    // prevent an open price/quantity/employee control from jumping rows.
-    setEditingPriceIdx(null);
-    setEditingPriceVal("");
-    setEditingQtyIdx(null);
-    setEditingQtyVal("");
-    setEmployeePickerIdx(null);
+    setServiceEdit(null);
 
     setSelectedServices(prev => {
       const idx = prev.findIndex(i => i.serviceId === srv._id);
@@ -281,48 +275,41 @@ const InvoiceCreate = () => {
     setSearchOpen(false);
   };
 
-  const updateQty = (idx: number, delta: number) => {
-    setSelectedServices(prev => {
-      const copy = [...prev];
-      copy[idx].quantity = Math.max(1, copy[idx].quantity + delta);
-      return copy;
+  const openServiceEditor = (idx: number) => {
+    const service = selectedServices[idx];
+    if (!service) return;
+    setServiceEdit({
+      index: idx,
+      name: service.name,
+      catalogPrice: service.catalogPrice,
+      price: formatVndInput(service.price),
+      quantity: String(service.quantity),
+      employeeId: service.employeeId,
     });
   };
 
-  const setExactQty = (idx: number, val: number) => {
-    const qty = Math.max(1, Math.floor(val) || 1);
+  const saveServiceEdit = () => {
+    if (!serviceEdit) return;
+    const quantity = Math.max(1, Math.floor(Number(serviceEdit.quantity)) || 1);
+    const price = Math.max(0, parseVndInput(serviceEdit.price));
     setSelectedServices(prev => {
-      const copy = [...prev]; copy[idx].quantity = qty; return copy;
+      if (!prev[serviceEdit.index]) return prev;
+      return prev.map((service, idx) => idx === serviceEdit.index ? {
+        ...service,
+        quantity,
+        price,
+        employeeId: serviceEdit.employeeId,
+        // A higher edit becomes the quoted price. A later lower edit keeps
+        // that reference so the reduction is visible on the invoice.
+        catalogPrice: Math.max(service.catalogPrice, price),
+      } : service);
     });
+    setServiceEdit(null);
   };
 
   const removeService = (idx: number) => {
     setSelectedServices(prev => prev.filter((_, i) => i !== idx));
-    setEmployeePickerIdx(null);
-    setEditingPriceIdx(null);
-    setEditingQtyIdx(null);
-  };
-
-  const setServiceEmployee = (idx: number, employeeId: string) => {
-    setSelectedServices(prev => {
-      const copy = [...prev]; copy[idx].employeeId = employeeId; return copy;
-    });
-    setEmployeePickerIdx(null);
-  };
-
-  const setServicePrice = (idx: number, price: number) => {
-    setSelectedServices(prev => {
-      const copy = [...prev];
-      const nextPrice = Math.max(0, price);
-      copy[idx] = {
-        ...copy[idx],
-        price: nextPrice,
-        // A higher edit becomes the new quoted/reference price. A lower edit
-        // keeps that reference so the UI can strike it out as a real discount.
-        catalogPrice: Math.max(copy[idx].catalogPrice, nextPrice),
-      };
-      return copy;
-    });
+    setServiceEdit(null);
   };
 
   // ── Build invoice payload ─────────────────────────────────────────────────
@@ -474,6 +461,9 @@ const InvoiceCreate = () => {
   const primaryEmployee = employees.find(employee => employee._id === primaryEmployeeId)
     || (sessionEmployee?._id === primaryEmployeeId ? sessionEmployee : null);
   const unassignedServiceCount = selectedServices.filter(service => !service.employeeId).length;
+  const serviceEditPrice = serviceEdit ? parseVndInput(serviceEdit.price) : 0;
+  const serviceEditQuantity = serviceEdit ? Math.max(1, Math.floor(Number(serviceEdit.quantity)) || 1) : 1;
+  const serviceEditDiscount = serviceEdit ? Math.max(serviceEdit.catalogPrice - serviceEditPrice, 0) : 0;
   const invoiceBreakdownData = {
     services: selectedServices.map(service => ({
       ...service,
@@ -588,193 +578,74 @@ const InvoiceCreate = () => {
               </p>
             </div>
 
-            {primaryEmployee && (
-              <div className="flex items-center gap-2 border-b border-stone-100 bg-white px-3 py-2 text-[10px] text-stone-500">
-                <UserCheck className="h-3.5 w-3.5 shrink-0 text-[#9E5E6F]" />
-                <p className="min-w-0 leading-relaxed">
-                  Bill chính của <span className="font-bold text-[#9E5E6F]">{primaryEmployee.name}</span>.
-                  <span className="hidden min-[360px]:inline"> Dịch vụ mới tự động gán cho nhân viên này; chỉ đổi những dịch vụ người khác hỗ trợ.</span>
-                </p>
-              </div>
-            )}
-
             {/* Items */}
             <div className="divide-y divide-stone-50">
               {selectedServices.map((srv, idx) => (
                 <div
                   key={srv.serviceId || `${srv.name}-${idx}`}
                   ref={idx === 0 ? newestServiceRef : undefined}
-                  className={`px-3 py-3 space-y-2 transition-colors duration-500 ${
+                  className={`transition-colors duration-500 ${
                     recentServiceId === srv.serviceId ? "bg-amber-50/80" : "bg-white"
                   }`}
                 >
-                  {/* Row 1: name + remove */}
-                  <div className="flex items-start gap-2">
-                    <div className="flex-1 min-w-0">
-                      <div className="flex flex-wrap items-center gap-1.5">
-                        <p className="text-xs font-semibold text-stone-800">{srv.name}</p>
-                        {recentServiceId === srv.serviceId && (
-                          <span className="rounded-full bg-amber-100 px-1.5 py-0.5 text-[8px] font-bold text-amber-700">
-                            Vừa thêm · ở trên cùng
-                          </span>
-                        )}
-                      </div>
-                    </div>
-                    <button
-                      onClick={() => removeService(idx)}
-                      className="p-1 text-stone-300 hover:text-red-500 transition shrink-0 active:scale-90 mt-0.5"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
-                  </div>
-
-                  {/* Row 2: price (editable) + qty controls + subtotal */}
-                  <div className="flex flex-wrap items-center gap-2">
-                    {/* Editable price */}
-                    <div className="min-w-[108px] flex-1">
-                      {editingPriceIdx === idx ? (
-                        <div className="flex items-center gap-1">
-                          <input
-                            type="text"
-                            inputMode="numeric"
-                            pattern="[0-9]*"
-                            enterKeyHint="done"
-                            autoFocus
-                            value={editingPriceVal}
-                            onChange={e => setEditingPriceVal(formatVndInput(e.target.value))}
-                            onBlur={() => {
-                              setServicePrice(idx, editingPriceVal ? parseVndInput(editingPriceVal) : srv.price);
-                              setEditingPriceIdx(null);
-                              setEditingPriceVal("");
-                            }}
-                            onKeyDown={e => {
-                              if (e.key === "Enter") (e.target as HTMLInputElement).blur();
-                              if (e.key === "Escape") { setEditingPriceIdx(null); setEditingPriceVal(""); }
-                            }}
-                            className="min-w-0 w-24 max-w-full px-2 py-1 text-xs font-bold bg-amber-50 border border-amber-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-amber-400 text-amber-800"
-                          />
-                          <span className="text-[10px] text-stone-400">đ</span>
-                        </div>
-                      ) : (
-                        <button
-                          onClick={() => { setEditingPriceIdx(idx); setEditingPriceVal(formatVndInput(srv.price)); }}
-                          className="flex flex-wrap items-center gap-1 group text-left"
-                          title="Chạm để sửa giá"
-                        >
-                          {srv.price < srv.catalogPrice && (
-                            <span className="text-[10px] text-stone-400 line-through font-serif">{formatPrice(srv.catalogPrice)}</span>
+                  <button
+                    type="button"
+                    onClick={() => openServiceEditor(idx)}
+                    className="group w-full px-4 py-3.5 text-left transition hover:bg-[#F9ECEF]/35 active:bg-[#F9ECEF]/70"
+                    aria-label={`Chỉnh dịch vụ ${srv.name}`}
+                  >
+                    <div className="flex items-start gap-3">
+                      <div className="min-w-0 flex-1">
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <p className="text-[15px] min-[375px]:text-base font-bold leading-snug text-stone-800">{srv.name}</p>
+                          {recentServiceId === srv.serviceId && (
+                            <span className="rounded-full bg-amber-100 px-1.5 py-0.5 text-[9px] font-bold text-amber-700">
+                              Vừa thêm · ở trên cùng
+                            </span>
                           )}
-                          <span className="text-xs font-bold text-[#9E5E6F] font-serif">{formatPrice(srv.price)}</span>
+                        </div>
+
+                        <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1">
+                          {srv.price < srv.catalogPrice && (
+                            <span className="text-xs font-semibold text-stone-400 line-through">{formatPrice(srv.catalogPrice)}</span>
+                          )}
+                          <span className="text-[15px] min-[375px]:text-base font-extrabold text-[#9E5E6F]">{formatPrice(srv.price)}</span>
                           {srv.price < srv.catalogPrice && srv.catalogPrice > 0 && (
-                            <span className="rounded-full bg-emerald-50 px-1 py-0.5 text-[8px] font-bold text-emerald-700">
+                            <span className="rounded-full bg-emerald-50 px-1.5 py-0.5 text-[9px] font-bold text-emerald-700">
                               -{Math.round((srv.catalogPrice - srv.price) / srv.catalogPrice * 10000) / 100}%
                             </span>
                           )}
-                          <Edit3 className="w-2.5 h-2.5 text-stone-300 group-hover:text-[#9E5E6F] transition ml-0.5" />
-                        </button>
-                      )}
-                      {editingPriceIdx !== idx && srv.price < srv.catalogPrice && (
-                        <p className="mt-0.5 text-[9px] font-semibold text-emerald-600">
-                          Giảm dòng {formatPrice((srv.catalogPrice - srv.price) * srv.quantity)}
-                        </p>
-                      )}
-                    </div>
+                          <span className="text-xs font-semibold text-stone-400">× {srv.quantity}</span>
+                        </div>
 
-                    {/* Qty controls */}
-                    <div className="flex items-center gap-0.5 bg-stone-50 border border-stone-200 rounded-xl p-0.5 shrink-0">
-                      <button onClick={() => updateQty(idx, -1)} className="p-1 text-stone-500 hover:text-stone-800 rounded-lg active:scale-90 transition">
-                        <Minus className="w-3 h-3" />
-                      </button>
-                      <input
-                        type="number"
-                        value={editingQtyIdx === idx ? editingQtyVal : String(srv.quantity)}
-                        onFocus={() => { setEditingQtyIdx(idx); setEditingQtyVal(String(srv.quantity)); }}
-                        onChange={e => setEditingQtyVal(e.target.value)}
-                        onBlur={() => {
-                          const n = parseInt(editingQtyVal, 10);
-                          setExactQty(idx, isNaN(n) || n < 1 ? 1 : n);
-                          setEditingQtyIdx(null); setEditingQtyVal("");
-                        }}
-                        className="w-8 text-center font-bold text-stone-800 text-xs bg-white rounded-lg border border-stone-200 focus:border-[#9E5E6F] focus:outline-none py-0.5"
-                      />
-                      <button onClick={() => updateQty(idx, 1)} className="p-1 text-stone-500 hover:text-stone-800 rounded-lg active:scale-90 transition">
-                        <Plus className="w-3 h-3" />
-                      </button>
-                    </div>
-
-                    {/* Subtotal */}
-                    <span className="ml-auto text-xs font-bold text-stone-700 shrink-0 min-w-[60px] text-right">
-                      = {formatPrice(srv.price * srv.quantity)}
-                    </span>
-                  </div>
-
-                  {/* Row 3: employee picker belongs to this service only */}
-                  <div className="relative">
-                    {(() => {
-                      const assignedEmployee = employees.find(employee => employee._id === srv.employeeId);
-                      return (
-                        <button
-                          type="button"
-                          onClick={() => setEmployeePickerIdx(current => current === idx ? null : idx)}
-                          className={`w-full min-h-10 flex items-center gap-2 rounded-xl border px-2.5 py-1.5 text-left transition ${
-                            assignedEmployee
-                              ? "border-[#E5B2C0] bg-[#F9ECEF]/60"
-                              : "border-dashed border-amber-300 bg-amber-50 text-amber-700"
-                          }`}
-                          aria-expanded={employeePickerIdx === idx}
-                        >
-                          {assignedEmployee ? (
-                            <>
-                              <div className="w-7 h-7 rounded-full overflow-hidden bg-[#9E5E6F] text-white flex items-center justify-center text-[9px] font-bold shrink-0">
-                                {assignedEmployee.avatar ? (
-                                  <img src={assignedEmployee.avatar} alt={assignedEmployee.name} className="w-full h-full object-cover" />
-                                ) : getEmpInitials(assignedEmployee._id)}
-                              </div>
-                              <div className="flex-1 min-w-0">
-                                <p className="text-[9px] text-stone-400 leading-none mb-0.5">
-                                  {assignedEmployee._id === primaryEmployeeId ? "Nhân viên chính · mặc định" : "Nhân viên hỗ trợ dịch vụ này"}
-                                </p>
-                                <p className="text-[11px] font-bold text-stone-700 truncate">{assignedEmployee.name}</p>
-                              </div>
-                            </>
-                          ) : (
-                            <>
-                              <UserCheck className="w-4 h-4 shrink-0" />
-                              <span className="flex-1 text-[11px] font-bold">Chọn nhân viên thực hiện *</span>
-                            </>
+                        <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px]">
+                          {(() => {
+                            const assignedEmployee = employees.find(employee => employee._id === srv.employeeId);
+                            return assignedEmployee ? (
+                              <span className="inline-flex items-center gap-1.5 font-semibold text-stone-500">
+                                <UserCheck className="h-3.5 w-3.5 text-[#9E5E6F]" />
+                                {assignedEmployee.name}
+                                {assignedEmployee._id === primaryEmployeeId && <span className="font-normal text-stone-400">· mặc định</span>}
+                              </span>
+                            ) : (
+                              <span className="font-bold text-amber-600">Chưa chọn nhân viên thực hiện</span>
+                            );
+                          })()}
+                          {srv.price < srv.catalogPrice && (
+                            <span className="font-semibold text-emerald-600">Giảm dòng {formatPrice((srv.catalogPrice - srv.price) * srv.quantity)}</span>
                           )}
-                          <ChevronDown className={`w-3.5 h-3.5 shrink-0 transition ${employeePickerIdx === idx ? "rotate-180" : ""}`} />
-                        </button>
-                      );
-                    })()}
-
-                    {employeePickerIdx === idx && (
-                      <div className="mt-1.5 rounded-xl border border-stone-200 bg-white p-1.5 shadow-lg grid grid-cols-2 gap-1.5">
-                        {employees.map(employee => {
-                          const isAssigned = employee._id === srv.employeeId;
-                          return (
-                            <button
-                              type="button"
-                              key={employee._id}
-                              onClick={() => setServiceEmployee(idx, employee._id)}
-                              className={`flex items-center gap-2 rounded-lg p-2 text-left transition ${
-                                isAssigned ? "bg-[#9E5E6F] text-white" : "bg-stone-50 text-stone-700 hover:bg-stone-100"
-                              }`}
-                            >
-                              <div className={`w-8 h-8 rounded-full overflow-hidden flex items-center justify-center text-[9px] font-bold shrink-0 ${
-                                isAssigned ? "bg-white/20 text-white" : "bg-[#F9ECEF] text-[#9E5E6F]"
-                              }`}>
-                                {employee.avatar ? (
-                                  <img src={employee.avatar} alt={employee.name} className="w-full h-full object-cover" />
-                                ) : getEmpInitials(employee._id)}
-                              </div>
-                              <span className="text-[10px] font-bold truncate">{employee.name}</span>
-                            </button>
-                          );
-                        })}
+                        </div>
                       </div>
-                    )}
-                  </div>
+
+                      <div className="shrink-0 text-right">
+                        <Edit3 className="ml-auto h-4 w-4 text-stone-300 transition group-hover:text-[#9E5E6F]" />
+                        <p className="mt-3 whitespace-nowrap text-sm min-[375px]:text-[15px] font-extrabold text-stone-800">
+                          {formatPrice(srv.price * srv.quantity)}
+                        </p>
+                        <p className="mt-0.5 hidden text-[9px] font-semibold uppercase tracking-wide text-stone-400 min-[360px]:block">Thành tiền</p>
+                      </div>
+                    </div>
+                  </button>
                 </div>
               ))}
             </div>
@@ -863,6 +734,183 @@ const InvoiceCreate = () => {
         )}
 
       </div>
+
+      {/* ── Service Edit Modal ── */}
+      {serviceEdit && (
+        <div
+          className="fixed inset-0 z-50 flex items-end justify-center bg-stone-900/60 px-3 backdrop-blur-[2px] sm:items-center sm:px-4"
+          style={{ paddingTop: "calc(12px + env(safe-area-inset-top, 0px))", paddingBottom: "calc(12px + env(safe-area-inset-bottom, 0px))" }}
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="service-edit-title"
+          onMouseDown={event => {
+            if (event.target === event.currentTarget) setServiceEdit(null);
+          }}
+        >
+          <form
+            onSubmit={event => { event.preventDefault(); saveServiceEdit(); }}
+            className="flex w-full max-w-sm max-h-[calc(100dvh-24px-env(safe-area-inset-top,0px)-env(safe-area-inset-bottom,0px))] flex-col overflow-hidden rounded-3xl border border-stone-100 bg-white shadow-2xl"
+          >
+            <div className="flex shrink-0 items-start gap-3 border-b border-stone-100 px-5 py-4">
+              <div className="min-w-0 flex-1">
+                <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-[#9E5E6F]">Chỉnh dịch vụ</p>
+                <h2 id="service-edit-title" className="mt-1 text-lg font-bold leading-snug text-stone-800">{serviceEdit.name}</h2>
+              </div>
+              <button
+                type="button"
+                onClick={() => setServiceEdit(null)}
+                className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-stone-100 text-stone-500 transition active:scale-95"
+                aria-label="Đóng cửa sổ chỉnh dịch vụ"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            <div className="min-h-0 flex-1 space-y-5 overflow-y-auto px-5 py-5">
+              <div>
+                <label className="mb-2 block text-sm font-semibold text-stone-600">Số lượng</label>
+                <div className="flex items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setServiceEdit(current => current ? {
+                      ...current,
+                      quantity: String(Math.max(1, (Number(current.quantity) || 1) - 1)),
+                    } : current)}
+                    className="flex h-11 w-11 items-center justify-center rounded-xl border border-stone-300 bg-white text-stone-700 transition active:scale-95"
+                    aria-label="Giảm số lượng"
+                  >
+                    <Minus className="h-5 w-5" />
+                  </button>
+                  <input
+                    type="number"
+                    min="1"
+                    inputMode="numeric"
+                    value={serviceEdit.quantity}
+                    onChange={event => setServiceEdit(current => current ? { ...current, quantity: event.target.value } : current)}
+                    className="h-11 w-20 border-0 border-b-2 border-stone-300 bg-transparent text-center text-xl font-extrabold text-stone-800 focus:border-[#9E5E6F] focus:outline-none"
+                    aria-label="Số lượng dịch vụ"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setServiceEdit(current => current ? {
+                      ...current,
+                      quantity: String((Number(current.quantity) || 0) + 1),
+                    } : current)}
+                    className="flex h-11 w-11 items-center justify-center rounded-xl border border-stone-300 bg-white text-stone-700 transition active:scale-95"
+                    aria-label="Tăng số lượng"
+                  >
+                    <Plus className="h-5 w-5" />
+                  </button>
+                </div>
+              </div>
+
+              <div>
+                <div className="mb-2 flex items-center justify-between gap-3">
+                  <label htmlFor="service-edit-price" className="text-sm font-semibold text-stone-600">Đơn giá</label>
+                  {serviceEditDiscount > 0 && (
+                    <span className="text-xs font-bold text-emerald-600">
+                      Giảm {formatPrice(serviceEditDiscount)} / dịch vụ
+                    </span>
+                  )}
+                </div>
+                <div className="relative">
+                  <input
+                    id="service-edit-price"
+                    type="text"
+                    inputMode="numeric"
+                    enterKeyHint="done"
+                    value={serviceEdit.price}
+                    onChange={event => setServiceEdit(current => current ? {
+                      ...current,
+                      price: formatVndInput(event.target.value),
+                    } : current)}
+                    className="h-12 w-full border-0 border-b-2 border-stone-300 bg-transparent pr-8 text-lg font-extrabold tabular-nums text-stone-800 focus:border-[#9E5E6F] focus:outline-none"
+                  />
+                  <span className="absolute right-0 top-1/2 -translate-y-1/2 text-sm font-semibold text-stone-400">đ</span>
+                </div>
+                {serviceEditPrice < serviceEdit.catalogPrice && (
+                  <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
+                    <span className="text-stone-400 line-through">{formatPrice(serviceEdit.catalogPrice)}</span>
+                    <span className="font-bold text-[#9E5E6F]">còn {formatPrice(serviceEditPrice)}</span>
+                    {serviceEdit.catalogPrice > 0 && (
+                      <span className="rounded-full bg-emerald-50 px-2 py-0.5 font-bold text-emerald-700">
+                        -{Math.round(serviceEditDiscount / serviceEdit.catalogPrice * 10000) / 100}%
+                      </span>
+                    )}
+                  </div>
+                )}
+                {serviceEditPrice > serviceEdit.catalogPrice && (
+                  <p className="mt-2 text-xs font-semibold text-amber-700">
+                    {formatPrice(serviceEditPrice)} sẽ là giá đã báo mới. Nếu giảm sau đó, giá này sẽ được gạch đi.
+                  </p>
+                )}
+              </div>
+
+              <div>
+                <div className="mb-2 flex items-center justify-between gap-3">
+                  <label className="text-sm font-semibold text-stone-600">Nhân viên thực hiện</label>
+                  <span className="text-[10px] text-stone-400">Chỉ đổi khi có người hỗ trợ</span>
+                </div>
+                <div className="grid max-h-36 grid-cols-2 gap-2 overflow-y-auto pr-0.5">
+                  {employees.map(employee => {
+                    const isAssigned = employee._id === serviceEdit.employeeId;
+                    return (
+                      <button
+                        type="button"
+                        key={employee._id}
+                        onClick={() => setServiceEdit(current => current ? { ...current, employeeId: employee._id } : current)}
+                        className={`flex min-h-12 items-center gap-2 rounded-xl border p-2 text-left transition ${
+                          isAssigned
+                            ? "border-[#9E5E6F] bg-[#F9ECEF] text-[#7F4353]"
+                            : "border-stone-200 bg-white text-stone-600"
+                        }`}
+                      >
+                        <div className={`flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-full text-[9px] font-bold ${
+                          isAssigned ? "bg-[#9E5E6F] text-white" : "bg-stone-100 text-stone-500"
+                        }`}>
+                          {employee.avatar ? (
+                            <img src={employee.avatar} alt="" className="h-full w-full object-cover" />
+                          ) : getEmpInitials(employee._id)}
+                        </div>
+                        <span className="min-w-0 flex-1">
+                          <span className="block truncate text-xs font-bold">{employee.name}</span>
+                          {employee._id === primaryEmployeeId && (
+                            <span className="block text-[9px] font-semibold text-[#9E5E6F]">Mặc định của bill</span>
+                          )}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div className="rounded-2xl bg-stone-50 px-3.5 py-3 text-sm">
+                <div className="flex items-center justify-between gap-3">
+                  <span className="font-semibold text-stone-500">Thành tiền dịch vụ</span>
+                  <span className="text-base font-extrabold text-[#9E5E6F]">{formatPrice(serviceEditPrice * serviceEditQuantity)}</span>
+                </div>
+              </div>
+            </div>
+
+            <div className="grid shrink-0 grid-cols-2 gap-3 border-t border-stone-100 bg-white px-5 py-4">
+              <button
+                type="button"
+                onClick={() => removeService(serviceEdit.index)}
+                className="flex min-h-12 items-center justify-center gap-2 rounded-xl border border-red-200 bg-white text-sm font-bold text-red-600 transition active:scale-[0.98]"
+              >
+                <Trash2 className="h-4 w-4" /> Xóa
+              </button>
+              <button
+                type="submit"
+                disabled={!serviceEdit.employeeId}
+                className="min-h-12 rounded-xl bg-[#187B49] px-5 text-sm font-bold text-white shadow-lg shadow-emerald-900/15 transition active:scale-[0.98] disabled:bg-stone-300 disabled:shadow-none"
+              >
+                Lưu
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
 
       {/* ── Sticky Bottom Bar ── */}
       <div
